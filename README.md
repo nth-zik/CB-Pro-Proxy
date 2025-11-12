@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/yourusername/cbv-vpn-app)
 [![Android Build](https://img.shields.io/badge/Android-Production%20Ready-success.svg)](https://github.com/yourusername/cbv-vpn-app)
-[![iOS Build](https://img.shields.io/badge/iOS-In%20Development-orange.svg)](https://github.com/yourusername/cbv-vpn-app)
+[![iOS Build](https://img.shields.io/badge/iOS-Implementation%20Ready-success.svg)](https://github.com/yourusername/cbv-vpn-app)
 [![React Native](https://img.shields.io/badge/React%20Native-0.81.5-blue.svg)](https://reactnative.dev/)
 [![Expo](https://img.shields.io/badge/Expo-~54.0-000020.svg)](https://expo.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
@@ -12,7 +12,7 @@
 
 **English documentation** — Vietnamese version available at [`README.vi.md`](./README.vi.md).
 
-CB Pro Proxy is an Expo-managed React Native application that provisions a local VPN interface and forwards traffic through SOCKS5 or HTTP proxies. The Android implementation ships with a fully native `VpnService` pipeline while the iOS Network Extension layer is under active development.
+CB Pro Proxy is an Expo-managed React Native application that provisions a local VPN interface and forwards traffic through SOCKS5 or HTTP proxies. The Android implementation ships with a fully native `VpnService` pipeline, and the iOS implementation now includes a complete Network Extension framework with packet tunnel provider.
 
 ## Product Overview
 
@@ -94,7 +94,7 @@ cbv-vpn-app/
 │   ├── native/                # JS bridge to native module (`VPNModule.ts`)
 │   └── types/                 # Shared TypeScript definitions
 ├── android/                   # Native Android module & VpnService implementation
-├── ios/                       # Placeholder for Network Extension (coming soon)
+├── ios/                       # iOS Network Extension implementation (Xcode setup required)
 ├── assets/                    # Icons & splash artwork
 └── app.json / package.json    # Expo & dependency configuration
 ```
@@ -149,13 +149,15 @@ cd android
 ./gradlew bundleRelease       # Generate AAB for Play Store
 ```
 
-### iOS (in progress)
+### iOS
 
 ```bash
 npx expo prebuild --platform ios
 cd ios
-open CBVVPN.xcworkspace       # Configure Network Extension in Xcode
+open CBVVPN.xcworkspace       # Configure Network Extension target in Xcode
 ```
+
+⚠️ **Important**: iOS implementation requires manual Xcode configuration. See [`ios/XCODE_SETUP_REQUIRED.md`](./ios/XCODE_SETUP_REQUIRED.md) for detailed setup instructions.
 
 ---
 
@@ -164,17 +166,29 @@ open CBVVPN.xcworkspace       # Configure Network Extension in Xcode
 - **React Native layer** — UI, profile management workflow, Zustand store, event-driven updates through `useVPNEvents`.
 - **Storage & security** — Profile metadata synced via `StorageService`, credentials isolated in secure storage.
 - **Native Android** — `VPNConnectionService` (derives from `VpnService`), packet routing, proxy clients, explicit broadcast receiver for automation, foreground notification for compliance.
-- **Native iOS** — Network Extension packet tunnel provider under construction; shares JS bridge contracts for parity.
+- **Native iOS** — Network Extension with `NEPacketTunnelProvider`, SOCKS5/HTTP proxy handlers, App Group data sharing, VPN Manager using NetworkExtension framework. See [`ios/iOS_PROXY_IMPLEMENTATION.md`](./ios/iOS_PROXY_IMPLEMENTATION.md) for details.
 
 ---
 
 ## Development Status
 
-- **Android**: production-ready (`VpnService`, SOCKS5/HTTP tunnelling, broadcast automation, telemetry).
-- **iOS**: Network Extension + go-tun2socks integration scheduled.
-- **Roadmap**: enhanced error analytics, multi-proxy rotation, UI polish.
+- **Android**: Production-ready (`VpnService`, SOCKS5/HTTP tunnelling, broadcast automation, telemetry).
+- **iOS**: Implementation complete (Network Extension, packet tunnel provider, SOCKS5/HTTP handlers). Requires Xcode configuration and optional tun2socks integration for production deployment.
+- **Roadmap**: Full packet routing optimization (tun2socks), enhanced error analytics, multi-proxy rotation, UI polish.
 
-Track ongoing work in `tasks.md` inside `.kiro/specs/` (private project planning).
+### iOS Implementation Notes
+
+The iOS proxy implementation includes:
+- ✅ VPNModule React Native bridge
+- ✅ Network Extension PacketTunnelProvider
+- ✅ SOCKS5 proxy handler (RFC 1928, RFC 1929)
+- ✅ HTTP CONNECT proxy handler
+- ✅ Profile storage with App Groups
+- ✅ VPN lifecycle management
+- ⚠️ Requires manual Xcode project configuration
+- 💡 Consider integrating [go-tun2socks](https://github.com/shadowsocks/go-tun2socks) for production-grade packet routing
+
+See [`ios/iOS_PROXY_IMPLEMENTATION.md`](./ios/iOS_PROXY_IMPLEMENTATION.md) for complete implementation details and [`ios/XCODE_SETUP_REQUIRED.md`](./ios/XCODE_SETUP_REQUIRED.md) for setup instructions.
 
 ---
 
