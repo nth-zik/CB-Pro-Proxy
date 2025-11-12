@@ -130,9 +130,8 @@ class HTTPProxyHandler {
             // Connection established successfully
             completion(connection, nil)
         } else {
-            // Parse status message
-            let statusMessage = statusComponents.dropFirst(2).joined(separator: " ")
-            let errorMessage = "HTTP Proxy error \(statusCode): \(statusMessage)"
+            // Use helper method to get descriptive error message
+            let errorMessage = getHTTPErrorMessage(statusCode)
             completion(nil, NSError(domain: "HTTPProxy", code: statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage]))
         }
     }
