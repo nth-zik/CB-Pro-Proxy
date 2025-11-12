@@ -1196,7 +1196,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@expo/config-plugins@npm:~54.0.2":
+"@expo/config-plugins@npm:^54.0.2, @expo/config-plugins@npm:~54.0.2":
   version: 54.0.2
   resolution: "@expo/config-plugins@npm:54.0.2"
   dependencies:
@@ -2749,6 +2749,7 @@ __metadata:
   resolution: "cbv-vpn-app@workspace:."
   dependencies:
     "@babel/core": "npm:^7.27.7"
+    "@expo/config-plugins": "npm:^54.0.2"
     "@react-native-async-storage/async-storage": "npm:^2.2.0"
     "@react-navigation/bottom-tabs": "npm:^7.8.2"
     "@react-navigation/native": "npm:^7.1.19"

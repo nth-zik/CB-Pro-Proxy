@@ -1,5 +1,15 @@
 # CB Pro Proxy
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/yourusername/cbv-vpn-app)
+[![Android Build](https://img.shields.io/badge/Android-Production%20Ready-success.svg)](https://github.com/yourusername/cbv-vpn-app)
+[![iOS Build](https://img.shields.io/badge/iOS-In%20Development-orange.svg)](https://github.com/yourusername/cbv-vpn-app)
+[![React Native](https://img.shields.io/badge/React%20Native-0.81.5-blue.svg)](https://reactnative.dev/)
+[![Expo](https://img.shields.io/badge/Expo-~54.0-000020.svg)](https://expo.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20iOS-lightgrey.svg)](https://github.com/yourusername/cbv-vpn-app)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/yourusername/cbv-vpn-app/pulls)
+
 **English documentation** — Vietnamese version available at [`README.vi.md`](./README.vi.md).
 
 CB Pro Proxy is an Expo-managed React Native application that provisions a local VPN interface and forwards traffic through SOCKS5 or HTTP proxies. The Android implementation ships with a fully native `VpnService` pipeline while the iOS Network Extension layer is under active development.
@@ -16,6 +26,15 @@ CB Pro Proxy revolutionizes proxy management on mobile devices by enabling seaml
 - **Secure & Efficient**: Credentials are stored securely, and connections are handled natively for optimal performance.
 
 Whether you're running Selenium tests, Appium scripts, or custom automation workflows, CB Pro Proxy bridges the gap between your development tools and mobile proxy needs.
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="./screenshot/screen.png" alt="Main Screen" width="300" />
+  <img src="./screenshot/screen-setting.png" alt="Settings Screen" width="300" />
+</p>
 
 ---
 

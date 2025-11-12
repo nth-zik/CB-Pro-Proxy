@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.27.7",
+    "@expo/config-plugins": "^54.0.2",
     "@types/react": "~19.1.0",
     "metro-minify-terser": "^0.83.3",
     "typescript": "~5.9.2"
