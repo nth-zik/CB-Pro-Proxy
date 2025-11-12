@@ -3,6 +3,8 @@ name: Build Android APK
 on:
   push:
     branches: [main]
+    tags:
+      - "v*"
   pull_request:
     branches: [main]
 
@@ -14,6 +16,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "version=1.0.0" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -22,6 +34,16 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Update app.json version
+        run: |
+          node -e "
+          const fs = require('fs');
+          const appJson = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          appJson.expo.version = '${{ steps.version.outputs.version }}';
+          fs.writeFileSync('app.json', JSON.stringify(appJson, null, 2) + '\n');
+          console.log('Updated version to: ${{ steps.version.outputs.version }}');
+          "
 
       - name: Prebuild for Android
         run: npx expo prebuild --platform android --no-install
@@ -41,5 +63,15 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-release.apk
+          name: app-release-${{ steps.version.outputs.version }}.apk
           path: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: android/app/build/outputs/apk/release/app-release.apk
+          tag_name: ${{ github.ref_name }}
+          body: "Android APK Release - Version ${{ steps.version.outputs.version }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
