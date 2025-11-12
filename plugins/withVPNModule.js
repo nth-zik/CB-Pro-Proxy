@@ -1,0 +1,63 @@
+const { withDangerousMod } = require('@expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Expo config plugin to integrate VPN native module
+ */
+const withVPNModule = (config) => {
+  return withDangerousMod(config, [
+    'android',
+    async (config) => {
+      const javaDir = path.join(
+        config.modRequest.platformProjectRoot,
+        'app',
+        'src',
+        'main',
+        'java',
+        'com',
+        'cbv',
+        'vpn'
+      );
+
+      const mainApplicationPath = path.join(javaDir, 'MainApplication.kt');
+
+      // Check if MainApplication.kt exists
+      if (fs.existsSync(mainApplicationPath)) {
+        let content = fs.readFileSync(mainApplicationPath, 'utf-8');
+
+        // Add VPNPackage to packages list if not present
+        if (!content.includes('VPNPackage()')) {
+          content = content.replace(
+            /(PackageList\(this\)\.packages\.apply \{[\s\S]*?\/\/ add\(MyReactNativePackage\(\)\))/,
+            '$1\n              add(VPNPackage())'
+          );
+        }
+
+        fs.writeFileSync(mainApplicationPath, content);
+        console.log('✅ Added VPNPackage to MainApplication.kt');
+      }
+
+      // Copy native files from template
+      const templateDir = path.join(__dirname, '..', 'native-templates', 'android');
+      
+      if (fs.existsSync(templateDir)) {
+        const files = ['VPNModule.kt', 'VPNPackage.kt', 'CBVVpnService.kt'];
+        
+        files.forEach(file => {
+          const src = path.join(templateDir, file);
+          const dest = path.join(javaDir, file);
+          
+          if (fs.existsSync(src)) {
+            fs.copyFileSync(src, dest);
+            console.log(`✅ Copied ${file}`);
+          }
+        });
+      }
+
+      return config;
+    },
+  ]);
+};
+
+module.exports = withVPNModule;
