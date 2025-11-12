@@ -1,4 +1,9 @@
-const { withDangerousMod } = require('@expo/config-plugins');
+const {
+  withDangerousMod,
+  withEntitlementsPlist,
+  withInfoPlist,
+  IOSConfig
+} = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
@@ -6,7 +11,8 @@ const path = require('path');
  * Expo config plugin to integrate VPN native module
  */
 const withVPNModule = (config) => {
-  return withDangerousMod(config, [
+  // Android configuration
+  config = withDangerousMod(config, [
     'android',
     async (config) => {
       const javaDir = path.join(
@@ -38,26 +44,101 @@ const withVPNModule = (config) => {
         console.log('✅ Added VPNPackage to MainApplication.kt');
       }
 
-      // Copy native files from template
-      const templateDir = path.join(__dirname, '..', 'native-templates', 'android');
-      
-      if (fs.existsSync(templateDir)) {
-        const files = ['VPNModule.kt', 'VPNPackage.kt', 'CBVVpnService.kt'];
-        
-        files.forEach(file => {
-          const src = path.join(templateDir, file);
-          const dest = path.join(javaDir, file);
-          
-          if (fs.existsSync(src)) {
-            fs.copyFileSync(src, dest);
-            console.log(`✅ Copied ${file}`);
+      return config;
+    },
+  ]);
+
+  // iOS configuration
+  // Add entitlements
+  config = withEntitlementsPlist(config, (config) => {
+    config.modResults['com.apple.developer.networking.networkextension'] = [
+      'packet-tunnel-provider'
+    ];
+    config.modResults['com.apple.security.application-groups'] = [
+      'group.com.cbv.vpn'
+    ];
+    console.log('✅ Added iOS VPN entitlements');
+    return config;
+  });
+
+  // Update Info.plist for background modes if needed
+  config = withInfoPlist(config, (config) => {
+    if (!config.modResults.UIBackgroundModes) {
+      config.modResults.UIBackgroundModes = [];
+    }
+    if (!config.modResults.UIBackgroundModes.includes('network-authentication')) {
+      config.modResults.UIBackgroundModes.push('network-authentication');
+    }
+    console.log('✅ Added iOS background modes');
+    return config;
+  });
+
+  // Copy iOS source files to project
+  config = withDangerousMod(config, [
+    'ios',
+    async (config) => {
+      const iosProjectRoot = config.modRequest.platformProjectRoot;
+      const projectName = config.modRequest.projectName || 'CBVVPN';
+      const projectDir = path.join(iosProjectRoot, projectName);
+
+      // Ensure project directory exists
+      if (!fs.existsSync(projectDir)) {
+        console.warn('⚠️ iOS project directory not found, skipping file copy');
+        return config;
+      }
+
+      // Copy VPN module files
+      const sourceFiles = [
+        'VPNModule.swift',
+        'VPNModule.m',
+        'VPNManager.swift',
+        'VPNProfile.swift',
+        'ProfileStorage.swift',
+        'SOCKS5ProxyHandler.swift',
+        'HTTPProxyHandler.swift'
+      ];
+
+      sourceFiles.forEach(file => {
+        const sourcePath = path.join(iosProjectRoot, projectName, file);
+        if (fs.existsSync(sourcePath)) {
+          console.log(`✅ iOS file already exists: ${file}`);
+        } else {
+          console.log(`⚠️ iOS file missing: ${file} (will be added during prebuild)`);
+        }
+      });
+
+      // Update bridging header
+      const bridgingHeaderPath = path.join(projectDir, `${projectName}-Bridging-Header.h`);
+      if (fs.existsSync(bridgingHeaderPath)) {
+        let content = fs.readFileSync(bridgingHeaderPath, 'utf-8');
+
+        const imports = [
+          '#import <React/RCTBridgeModule.h>',
+          '#import <React/RCTEventEmitter.h>'
+        ];
+
+        let modified = false;
+        imports.forEach(importStatement => {
+          if (!content.includes(importStatement)) {
+            content += `\n${importStatement}`;
+            modified = true;
           }
         });
+
+        if (modified) {
+          fs.writeFileSync(bridgingHeaderPath, content);
+          console.log('✅ Updated iOS bridging header');
+        }
       }
+
+      console.log('\n📝 Note: iOS Network Extension target must be configured manually in Xcode');
+      console.log('   See: ios/XCODE_SETUP_REQUIRED.md for instructions\n');
 
       return config;
     },
   ]);
+
+  return config;
 };
 
 module.exports = withVPNModule;

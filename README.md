@@ -54,29 +54,50 @@ Whether you're running Selenium tests, Appium scripts, or custom automation work
 - npm or Yarn Classic (Yarn Berry ≥2 requires `yarn add -D metro-minify-terser`)
 - Expo CLI (`npx expo`)
 - Android Studio (emulator, SDK platforms)
-- Xcode (for upcoming iOS Network Extension work)
+- Xcode 15.4+ (for iOS development)
+- CocoaPods (for iOS dependencies)
 
 ---
 
 ## Quick Start
 
+### Expo Managed Workflow with Native Modules
+
+This project uses **Expo prebuild** to integrate custom native VPN modules.
+
 ```bash
 # Clone & install
 git clone <repository-url>
-cd cbv-vpn-app
+cd CB-Pro-Proxy
 npm install
 
-# Start Expo dev server
-npm start
+# Generate native projects (iOS + Android)
+npx expo prebuild
 
-# Launch on Android (development build required)
-npm run android
+# For iOS: Install CocoaPods dependencies
+cd ios && pod install && cd ..
 
-# Launch on iOS simulator (development build required)
-npm run ios
+# Run on device
+npm run ios     # iOS (requires Xcode)
+npm run android # Android
 ```
 
-> **Tip:** Use `npx expo run:android` / `npx expo run:ios` to generate native projects on demand.
+### Development with Hot Reload
+
+```bash
+# Build dev client once
+npx expo run:ios    # or npm run ios
+npx expo run:android # or npm run android
+
+# Then use dev server for fast refresh
+npm start
+# Press 'i' for iOS, 'a' for Android
+```
+
+> **Important:**
+> - ⚠️ **Expo Go not supported** - Native VPN modules require custom dev build
+> - 📖 See [EXPO_PREBUILD_GUIDE.md](./EXPO_PREBUILD_GUIDE.md) for detailed workflow
+> - 🔧 iOS Network Extension requires manual Xcode configuration (see [ios/XCODE_SETUP_REQUIRED.md](./ios/XCODE_SETUP_REQUIRED.md))
 
 ---
 
@@ -140,7 +161,9 @@ See [`ADB_INTENT_COMMANDS.md`](./ADB_INTENT_COMMANDS.md) for the full catalogue,
 
 ## Build for Production
 
-### Android
+### Manual Build
+
+#### Android
 
 ```bash
 npx expo prebuild --platform android
@@ -149,15 +172,41 @@ cd android
 ./gradlew bundleRelease       # Generate AAB for Play Store
 ```
 
-### iOS
+#### iOS
 
 ```bash
 npx expo prebuild --platform ios
 cd ios
+pod install
 open CBVVPN.xcworkspace       # Configure Network Extension target in Xcode
 ```
 
 ⚠️ **Important**: iOS implementation requires manual Xcode configuration. See [`ios/XCODE_SETUP_REQUIRED.md`](./ios/XCODE_SETUP_REQUIRED.md) for detailed setup instructions.
+
+### CI/CD with GitHub Actions
+
+Automated builds are configured for both platforms:
+
+- **Android APK**: `.github/workflows/build-android.yml`
+- **iOS IPA**: `.github/workflows/build-ios.yml`
+
+**Setup GitHub Secrets:**
+See [`.github/SECRETS.md`](./.github/SECRETS.md) for complete list of required secrets:
+
+- Android: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, etc.
+- iOS: `IOS_CERTIFICATE_BASE64`, `IOS_PROVISIONING_PROFILE_BASE64`, etc.
+
+**Trigger Builds:**
+```bash
+# Push to main branch
+git push origin main
+
+# Or create a release tag
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Artifacts will be uploaded to GitHub Actions and releases will be created for tags.
 
 ---
 
@@ -198,6 +247,25 @@ See [`ios/iOS_PROXY_IMPLEMENTATION.md`](./ios/iOS_PROXY_IMPLEMENTATION.md) for c
 - **Expo Go limitation** — Requires development client or production build due to custom native modules.
 - **No traffic after connect** — Verify upstream proxy availability and credentials; inspect logcat with `adb logcat | grep VPN`.
 - **Build issues** — Refer to [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) for common Gradle/Xcode remedies.
+
+---
+
+## Documentation
+
+### Core Documentation
+- 📖 [**EXPO_PREBUILD_GUIDE.md**](./EXPO_PREBUILD_GUIDE.md) - Complete guide for Expo prebuild workflow
+- 📖 [**ADB_INTENT_COMMANDS.md**](./ADB_INTENT_COMMANDS.md) - Android automation via ADB broadcasts
+- 📖 [**TROUBLESHOOTING.md**](./TROUBLESHOOTING.md) - Common issues and solutions
+
+### iOS-Specific
+- 🍎 [**ios/iOS_PROXY_IMPLEMENTATION.md**](./ios/iOS_PROXY_IMPLEMENTATION.md) - Technical implementation details
+- 🍎 [**ios/XCODE_SETUP_REQUIRED.md**](./ios/XCODE_SETUP_REQUIRED.md) - Step-by-step Xcode configuration
+- 🍎 [**ios/configure-network-extension.sh**](./ios/configure-network-extension.sh) - Configuration helper script
+
+### CI/CD
+- 🔧 [**.github/SECRETS.md**](./.github/SECRETS.md) - GitHub Actions secrets setup guide
+- 🔧 [**.github/workflows/build-android.yml**](./.github/workflows/build-android.yml) - Android build workflow
+- 🔧 [**.github/workflows/build-ios.yml**](./.github/workflows/build-ios.yml) - iOS build workflow
 
 ---
 
