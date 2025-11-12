@@ -260,7 +260,10 @@ cd ..
 
 ## CI/CD with GitHub Actions
 
-See `.github/workflows/build-android.yml` and `.github/workflows/build-ios.yml`
+See workflows:
+- `.github/workflows/build-android.yml` - Android APK
+- `.github/workflows/build-ios.yml` - iOS IPA (device)
+- `.github/workflows/build-ios-simulator.yml` - iOS Simulator (no secrets!)
 
 The workflows automatically:
 1. ✅ Run `npx expo prebuild`
@@ -271,7 +274,35 @@ The workflows automatically:
 Secrets required:
 - See `.github/SECRETS.md` for complete list
 - Android: Keystore and signing credentials
-- iOS: Certificates and provisioning profiles
+- iOS Device: Certificates and provisioning profiles
+- iOS Simulator: **No secrets needed!** ✨
+
+## iOS Simulator Builds (No Apple Developer)
+
+For testing and CI without Apple Developer account:
+
+```bash
+# Automated build
+./scripts/build-simulator.sh
+
+# Or manual
+cd ios
+xcodebuild -workspace CBVVPN.xcworkspace \
+  -scheme CBVVPN \
+  -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+  CODE_SIGN_IDENTITY="" \
+  CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGNING_ALLOWED=NO
+```
+
+**Perfect for:**
+- ✅ CI/CD testing (no secrets!)
+- ✅ Unit tests
+- ✅ Snapshot tests
+- ✅ Development testing
+
+**See:** `docs/IOS_SIMULATOR_BUILD.md` for complete guide
 
 ## Directory Structure After Prebuild
 

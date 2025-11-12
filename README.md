@@ -172,7 +172,7 @@ cd android
 ./gradlew bundleRelease       # Generate AAB for Play Store
 ```
 
-#### iOS
+#### iOS - Device (Requires Apple Developer)
 
 ```bash
 npx expo prebuild --platform ios
@@ -183,12 +183,34 @@ open CBVVPN.xcworkspace       # Configure Network Extension target in Xcode
 
 ⚠️ **Important**: iOS implementation requires manual Xcode configuration. See [`ios/XCODE_SETUP_REQUIRED.md`](./ios/XCODE_SETUP_REQUIRED.md) for detailed setup instructions.
 
+#### iOS - Simulator (No Apple Developer Required)
+
+```bash
+# Automated build for simulator
+./scripts/build-simulator.sh
+
+# Or manual build
+npx expo prebuild --platform ios
+cd ios && pod install
+xcodebuild -workspace CBVVPN.xcworkspace \
+  -scheme CBVVPN \
+  -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+  CODE_SIGN_IDENTITY="" \
+  CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGNING_ALLOWED=NO
+```
+
+✅ **Perfect for:** CI/CD, testing, development, no certificates needed!
+📖 **See:** [`docs/IOS_SIMULATOR_BUILD.md`](./docs/IOS_SIMULATOR_BUILD.md) for complete guide
+
 ### CI/CD with GitHub Actions
 
 Automated builds are configured for both platforms:
 
-- **Android APK**: `.github/workflows/build-android.yml`
-- **iOS IPA**: `.github/workflows/build-ios.yml`
+- **Android APK**: `.github/workflows/build-android.yml` (requires keystore secrets)
+- **iOS IPA** (Device): `.github/workflows/build-ios.yml` (requires certificates)
+- **iOS Simulator**: `.github/workflows/build-ios-simulator.yml` (no secrets needed! ✨)
 
 **Setup GitHub Secrets:**
 See [`.github/SECRETS.md`](./.github/SECRETS.md) for complete list of required secrets:
@@ -261,11 +283,13 @@ See [`ios/iOS_PROXY_IMPLEMENTATION.md`](./ios/iOS_PROXY_IMPLEMENTATION.md) for c
 - 🍎 [**ios/iOS_PROXY_IMPLEMENTATION.md**](./ios/iOS_PROXY_IMPLEMENTATION.md) - Technical implementation details
 - 🍎 [**ios/XCODE_SETUP_REQUIRED.md**](./ios/XCODE_SETUP_REQUIRED.md) - Step-by-step Xcode configuration
 - 🍎 [**ios/configure-network-extension.sh**](./ios/configure-network-extension.sh) - Configuration helper script
+- 🧪 [**docs/IOS_SIMULATOR_BUILD.md**](./docs/IOS_SIMULATOR_BUILD.md) - Simulator build guide (no Apple Developer needed!)
 
 ### CI/CD
 - 🔧 [**.github/SECRETS.md**](./.github/SECRETS.md) - GitHub Actions secrets setup guide
 - 🔧 [**.github/workflows/build-android.yml**](./.github/workflows/build-android.yml) - Android build workflow
-- 🔧 [**.github/workflows/build-ios.yml**](./.github/workflows/build-ios.yml) - iOS build workflow
+- 🔧 [**.github/workflows/build-ios.yml**](./.github/workflows/build-ios.yml) - iOS device build workflow
+- 🧪 [**.github/workflows/build-ios-simulator.yml**](./.github/workflows/build-ios-simulator.yml) - iOS simulator build (no secrets!)
 
 ---
 
