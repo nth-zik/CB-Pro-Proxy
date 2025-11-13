@@ -565,6 +565,19 @@ class VPNModule(reactContext: ReactApplicationContext) :
         }
     }
     
+    @ReactMethod
+    fun getActiveProfileId(promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
+            val activeProfileId = prefs.getString("selected_profile_id", null)
+            Log.d(TAG, "📂 Getting active profile ID from SharedPreferences: $activeProfileId")
+            promise.resolve(activeProfileId)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error getting active profile ID: ${e.message}", e)
+            promise.reject("GET_ACTIVE_PROFILE_ERROR", e.message, e)
+        }
+    }
+    
     private fun getProfilesArray(): JSONArray {
         val prefs = reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
         val profilesStr = prefs.getString("profiles", "[]")

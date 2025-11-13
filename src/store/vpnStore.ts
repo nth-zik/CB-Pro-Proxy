@@ -68,8 +68,27 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
             // Load profiles từ storage
             const profiles = await storageService.getProfiles();
 
-            // Load selected profile từ persistence
-            const selectedProfileId = await AsyncStorage.getItem(SELECTED_PROFILE_KEY);
+            // Load selected profile từ native SharedPreferences (priority)
+            // This ensures we get the profile set via ADB or native code
+            let selectedProfileId: string | null = null;
+            try {
+                const { VPNModule } = await import('../native');
+                selectedProfileId = await VPNModule.getActiveProfileId();
+                console.log('📂 Loaded active profile from native:', selectedProfileId);
+            } catch (nativeError) {
+                console.warn('Failed to load active profile from native, falling back to AsyncStorage:', nativeError);
+            }
+
+            // Fallback to AsyncStorage if native returns null
+            if (!selectedProfileId) {
+                selectedProfileId = await AsyncStorage.getItem(SELECTED_PROFILE_KEY);
+                console.log('📂 Loaded active profile from AsyncStorage:', selectedProfileId);
+            }
+
+            // Sync to AsyncStorage if we got it from native
+            if (selectedProfileId) {
+                await AsyncStorage.setItem(SELECTED_PROFILE_KEY, selectedProfileId);
+            }
 
             set({
                 profiles,

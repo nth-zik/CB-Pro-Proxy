@@ -8,6 +8,7 @@ const LINKING_ERROR =
 
 type NativeVPNModuleShape = {
     getProfiles(): Promise<any[]>;
+    getActiveProfileId(): Promise<string | null>;
     saveProfile(
         name: string,
         host: string,
@@ -121,6 +122,7 @@ const normalizeStatus = (payload: NativeStatusPayload): VPNStatusInfo => {
 
 export const VPNModule = {
     getProfiles: () => NativeVPNModule.getProfiles(),
+    getActiveProfileId: () => NativeVPNModule.getActiveProfileId(),
     saveProfile: (
         name: string,
         host: string,
