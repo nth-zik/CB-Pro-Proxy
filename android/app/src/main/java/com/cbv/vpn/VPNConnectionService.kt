@@ -5,12 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -72,12 +76,61 @@ class VPNConnectionService : VpnService() {
         super.onCreate()
         Log.d(TAG, "VPNConnectionService created")
         createNotificationChannel()
+        // Check notification permission on Android 13+
+        val notifAllowed = try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                val granted = ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (!granted) {
+                    Log.w(TAG, "POST_NOTIFICATIONS not granted on API>=33")
+                }
+                granted
+            } else {
+                NotificationManagerCompat.from(this).areNotificationsEnabled()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to check notification permission: ${e.message}")
+            true
+        }
+
+        if (!notifAllowed) {
+            Log.e(TAG, "Cannot start foreground: notification permission missing")
+            try {
+                broadcastStatus(STATUS_DISCONNECTED, force = true, error = "Notification permission required on Android 13+")
+                // Ask RN layer to request permission and bring app to foreground
+                val reqIntent = Intent("com.cbv.vpn.REQUEST_NOTIF_PERMISSION")
+                androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(this).sendBroadcast(reqIntent)
+            } catch (_: Exception) {}
+            stopSelf()
+            return
+        }
+
         val notification = createNotification("VPN Service")
-        startForeground(NOTIFICATION_ID, notification)
+        val fgsType = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
+        try {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification,
+                fgsType
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "ServiceCompat.startForeground failed: ${e.message}")
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (e2: Exception) {
+                Log.e(TAG, "startForeground failed: ${e2.message}")
+                broadcastStatus(STATUS_DISCONNECTED, force = true, error = e2.message)
+                stopSelf()
+                return
+            }
+        }
         
-        // Register receiver for bytes received from connections
+        // Register receiver for bytes received from connections via LocalBroadcastManager
         val filter = android.content.IntentFilter("com.cbv.vpn.BYTES_RECEIVED")
-        registerReceiver(bytesReceivedReceiver, filter)
+        LocalBroadcastManager.getInstance(this).registerReceiver(bytesReceivedReceiver, filter)
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -100,9 +153,17 @@ class VPNConnectionService : VpnService() {
             proxyUsername = intent.getStringExtra("username") ?: ""
             proxyPassword = intent.getStringExtra("password") ?: ""
             proxyType = intent.getStringExtra("type") ?: "socks5"
-            
+
             Log.d(TAG, "Starting VPN with proxy: $proxyType://$proxyServer:$proxyPort")
-            
+
+            if (proxyServer.isEmpty() || proxyPort <= 0) {
+                val err = "Invalid proxy configuration"
+                Log.e(TAG, "❌ $err: server='$proxyServer' port=$proxyPort")
+                broadcastStatus(STATUS_DISCONNECTED, force = true, error = err)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
             startVPN()
         }
         return START_STICKY
@@ -548,11 +609,11 @@ class VPNConnectionService : VpnService() {
     
     override fun onDestroy() {
         super.onDestroy()
-        try {
-            unregisterReceiver(bytesReceivedReceiver)
-        } catch (e: Exception) {
-            Log.w(TAG, "Error unregistering receiver: ${e.message}")
-        }
+            try {
+                LocalBroadcastManager.getInstance(this).unregisterReceiver(bytesReceivedReceiver)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error unregistering receiver: ${e.message}")
+            }
         stopVPN()
     }
     

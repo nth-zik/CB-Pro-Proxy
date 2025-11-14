@@ -301,6 +301,30 @@ class VPNIntentReceiver : BroadcastReceiver() {
             // Wait a moment for the stop to complete
             Thread.sleep(500)
             
+            // Check notification permission on Android 13+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val notifGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+                    context,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (!notifGranted) {
+                    Log.w(TAG, "⚠️ POST_NOTIFICATIONS not granted, bringing app to foreground to request")
+                    try {
+                        val reqIntent = Intent("com.cbv.vpn.REQUEST_NOTIF_PERMISSION")
+                        LocalBroadcastManager.getInstance(context).sendBroadcast(reqIntent)
+                    } catch (_: Exception) {}
+                    val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                    launchIntent?.apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    }
+                    if (launchIntent != null) {
+                        context.startActivity(launchIntent)
+                    }
+                    return
+                }
+            }
+
             // Permission already granted, start VPN service directly
             val profileId = profile.getString("id")
             val proxyHost = profile.getString("host")
@@ -339,10 +363,27 @@ class VPNIntentReceiver : BroadcastReceiver() {
             serviceIntent.putExtra("dns1", profile.optString("dns1", "1.1.1.1"))
             serviceIntent.putExtra("dns2", profile.optString("dns2", "8.8.8.8"))
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                val shouldBringToFront = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    e.javaClass.simpleName.contains("ForegroundServiceStartNotAllowedException")
+                if (shouldBringToFront) {
+                    val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                    launchIntent?.apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    }
+                    if (launchIntent != null) {
+                        context.startActivity(launchIntent)
+                    }
+                } else {
+                    throw e
+                }
             }
             
             Log.d(TAG, "✅ VPN service started successfully")

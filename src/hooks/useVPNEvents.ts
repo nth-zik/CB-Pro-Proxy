@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { VPNModule } from '../native';
+import { PermissionsAndroid, Platform } from 'react-native';
+import { VPNModule, VPNModuleEmitter } from '../native';
 import { VPNStatusInfo } from '../types';
 import { useVPNStore } from '../store';
 
@@ -83,6 +84,35 @@ export const useVPNEvents = () => {
             }
         });
 
+        const notifPermissionSubscription = VPNModuleEmitter.addListener('notificationPermissionRequired', async () => {
+            try {
+                if (Platform.OS === 'android') {
+                    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+                    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+                        await loadProfiles();
+                        const activeId = await VPNModule.getActiveProfileId();
+                        if (activeId) {
+                            const profile = profiles.find(p => p.id === activeId);
+                            if (profile) {
+                                await VPNModule.startVPNWithProfile(
+                                    profile.name,
+                                    profile.host,
+                                    profile.port,
+                                    profile.type,
+                                    profile.username || '',
+                                    profile.password || '',
+                                    profile.dns1,
+                                    profile.dns2
+                                );
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to request notification permission:', e);
+            }
+        });
+
         // Cleanup subscriptions
         return () => {
             statusSubscription.remove();
@@ -90,6 +120,7 @@ export const useVPNEvents = () => {
             profileSubscription.remove();
             permissionSubscription.remove();
             activeProfileSubscription.remove();
+            notifPermissionSubscription.remove();
         };
     }, [setVPNStatus, setError, loadProfiles, setProfileNotification, profiles, selectProfile]);
 };

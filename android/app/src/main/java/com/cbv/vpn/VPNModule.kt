@@ -100,6 +100,11 @@ class VPNModule(reactContext: ReactApplicationContext) :
                     }
                     sendEvent("activeProfileChanged", params)
                 }
+                "com.cbv.vpn.REQUEST_NOTIF_PERMISSION" -> {
+                    Log.d(TAG, "📨 Notification permission required on Android 13+")
+                    val params = Arguments.createMap()
+                    sendEvent("notificationPermissionRequired", params)
+                }
             }
         }
     }
@@ -112,6 +117,7 @@ class VPNModule(reactContext: ReactApplicationContext) :
         val profileFilter = IntentFilter().apply {
             addAction(VPNIntentReceiver.ACTION_PROFILES_UPDATED)
             addAction("com.cbv.vpn.REQUEST_VPN_PERMISSION")
+            addAction("com.cbv.vpn.REQUEST_NOTIF_PERMISSION")
             addAction("com.cbv.vpn.ACTIVE_PROFILE_CHANGED")
         }
         LocalBroadcastManager.getInstance(reactContext).registerReceiver(profilesUpdatedReceiver, profileFilter)

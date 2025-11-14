@@ -404,10 +404,10 @@ class TCPConnection(
     
     private fun notifyBytesReceived(bytes: Long) {
         try {
-            // Notify VPN service about bytes received
+            // Notify VPN service about bytes received (local broadcast)
             val intent = android.content.Intent("com.cbv.vpn.BYTES_RECEIVED")
             intent.putExtra("bytes", bytes)
-            vpnService.sendBroadcast(intent)
+            androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(vpnService).sendBroadcast(intent)
         } catch (e: Exception) {
             // Ignore broadcast errors
         }
