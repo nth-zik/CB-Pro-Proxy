@@ -41,6 +41,7 @@
     },
     "plugins": [
       "./plugins/withVPNModule.js",
+      "./plugins/withAdaptiveIconInset.js",
       [
         "expo-build-properties",
         {
