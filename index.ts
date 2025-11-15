@@ -1,6 +1,10 @@
-import { registerRootComponent } from 'expo';
+// CRITICAL: This must be the FIRST import to polyfill crypto.getRandomValues()
+// Required for uuid package and other crypto-dependent libraries
+import "react-native-get-random-values";
 
-import App from './App';
+import { registerRootComponent } from "expo";
+
+import App from "./App";
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,

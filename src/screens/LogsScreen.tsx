@@ -1,169 +1,174 @@
-import React, { useState, useEffect } from 'react';
-import {
-    View,
-    Text,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+/**
+ * LogsScreen - Simple logs viewer
+ *
+ * Features:
+ * - Real-time log display
+ * - Clear logs
+ * - Dark mode support
+ */
 
-interface LogEntry {
-    id: string;
-    timestamp: Date;
-    level: 'info' | 'warning' | 'error';
-    message: string;
-}
+import React, { useCallback } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useThemedStyles } from "../hooks/useThemedStyles";
+import { useLoggingStore } from "../store/loggingStore";
+import { LogEntry } from "../components/LogEntry";
+import { useCustomModal } from "../hooks";
+import { CustomModal } from "../components/CustomModal";
+import type { Theme } from "../types/theme";
 
 export const LogsScreen: React.FC = () => {
-    const [logs, setLogs] = useState<LogEntry[]>([
-        {
-            id: '1',
-            timestamp: new Date(),
-            level: 'info',
-            message: 'App started',
-        },
-    ]);
+  const styles = useThemedStyles(createStyles);
+  const { logs, clearLogs } = useLoggingStore();
+  const modal = useCustomModal();
 
-    const clearLogs = () => {
-        setLogs([]);
-    };
+  // Sort logs by timestamp (newest first) and ensure unique keys
+  const sortedLogs = React.useMemo(() => {
+    const sorted = [...logs].sort((a, b) => b.timestamp - a.timestamp);
 
-    const getLevelColor = (level: string) => {
-        switch (level) {
-            case 'error':
-                return '#F44336';
-            case 'warning':
-                return '#FFC107';
-            default:
-                return '#4CAF50';
-        }
-    };
+    // DEBUG: Check for duplicate IDs in the sorted logs
+    const idSet = new Set<string>();
+    const duplicates: string[] = [];
+    sorted.forEach((log) => {
+      if (idSet.has(log.id)) {
+        duplicates.push(log.id);
+      }
+      idSet.add(log.id);
+    });
 
-    const getLevelIcon = (level: string) => {
-        switch (level) {
-            case 'error':
-                return '❌';
-            case 'warning':
-                return '⚠️';
-            default:
-                return 'ℹ️';
-        }
-    };
+    if (duplicates.length > 0) {
+      console.error(
+        `[LogsScreen] Found ${duplicates.length} duplicate IDs:`,
+        duplicates
+      );
+    }
 
-    return (
-        <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
-            <View style={styles.header}>
-                <Text style={styles.title}>Connection Logs</Text>
-                <TouchableOpacity style={styles.clearButton} onPress={clearLogs}>
-                    <Text style={styles.clearButtonText}>Clear</Text>
-                </TouchableOpacity>
-            </View>
+    return sorted;
+  }, [logs]);
 
-            <ScrollView style={styles.logContainer}>
-                {logs.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>No logs yet</Text>
-                    </View>
-                ) : (
-                    logs.map((log) => (
-                        <View key={log.id} style={styles.logEntry}>
-                            <View style={styles.logHeader}>
-                                <Text style={styles.logIcon}>{getLevelIcon(log.level)}</Text>
-                                <Text
-                                    style={[
-                                        styles.logLevel,
-                                        { color: getLevelColor(log.level) },
-                                    ]}
-                                >
-                                    {log.level.toUpperCase()}
-                                </Text>
-                                <Text style={styles.logTime}>
-                                    {log.timestamp.toLocaleTimeString()}
-                                </Text>
-                            </View>
-                            <Text style={styles.logMessage}>{log.message}</Text>
-                        </View>
-                    ))
-                )}
-            </ScrollView>
-        </SafeAreaView>
+  // Handle clear logs
+  const handleClearLogs = useCallback(() => {
+    modal.showConfirm(
+      "Clear Logs",
+      "Are you sure you want to clear all logs? This action cannot be undone.",
+      () => {
+        clearLogs();
+        modal.showSuccess("Success", "All logs have been cleared");
+      },
+      undefined,
+      "Clear",
+      "Cancel"
     );
+  }, [clearLogs, modal]);
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.title}>Logs ({logs.length})</Text>
+          <TouchableOpacity
+            style={styles.clearButton}
+            onPress={handleClearLogs}
+          >
+            <Text style={styles.clearButtonText}>Clear All</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Logs List */}
+        {sortedLogs.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No logs yet</Text>
+            <Text style={styles.emptySubtext}>
+              Logs will appear here as the app runs
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={sortedLogs}
+            keyExtractor={(item, index) => {
+              // Use ID as primary key, but fallback to index if ID is duplicated
+              // This prevents React key warnings while we investigate the root cause
+              return `${item.id}-${index}`;
+            }}
+            renderItem={({ item }) => <LogEntry entry={item} />}
+            contentContainerStyle={styles.listContent}
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={10}
+            updateCellsBatchingPeriod={50}
+            initialNumToRender={10}
+            windowSize={5}
+          />
+        )}
+      </View>
+      <CustomModal
+        visible={modal.visible}
+        config={modal.config}
+        onDismiss={modal.hideModal}
+      />
+    </SafeAreaView>
+  );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: Theme) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: theme.colors.background.primary,
+    },
     container: {
-        flex: 1,
-        backgroundColor: '#f5f5f5',
+      flex: 1,
     },
     header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 16,
-        backgroundColor: '#fff',
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingVertical: 16,
     },
     title: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#333',
+      fontSize: theme.typography.fontSize.xl,
+      fontWeight: theme.typography.fontWeight.bold,
+      color: theme.colors.text.primary,
     },
     clearButton: {
-        backgroundColor: '#FF3B30',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      backgroundColor: theme.colors.interactive.primary,
+      borderRadius: theme.borderRadius.md,
     },
     clearButtonText: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '600',
+      color: theme.colors.text.inverse,
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.medium,
     },
-    logContainer: {
-        flex: 1,
-        padding: 16,
+    listContent: {
+      paddingVertical: 8,
     },
     emptyContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 60,
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      padding: 32,
     },
     emptyText: {
-        fontSize: 16,
-        color: '#999',
+      fontSize: theme.typography.fontSize.lg,
+      fontWeight: theme.typography.fontWeight.medium,
+      color: theme.colors.text.secondary,
+      textAlign: "center",
+      marginBottom: 8,
     },
-    logEntry: {
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        padding: 12,
-        marginBottom: 8,
-        borderLeftWidth: 4,
-        borderLeftColor: '#4CAF50',
+    emptySubtext: {
+      fontSize: theme.typography.fontSize.md,
+      color: theme.colors.text.tertiary,
+      textAlign: "center",
     },
-    logHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 4,
-    },
-    logIcon: {
-        fontSize: 16,
-        marginRight: 8,
-    },
-    logLevel: {
-        fontSize: 12,
-        fontWeight: 'bold',
-        marginRight: 8,
-    },
-    logTime: {
-        fontSize: 12,
-        color: '#999',
-    },
-    logMessage: {
-        fontSize: 14,
-        color: '#333',
-        marginLeft: 24,
-    },
-});
+  });
+
+export default LogsScreen;

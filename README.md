@@ -40,11 +40,32 @@ Whether you're running Selenium tests, Appium scripts, or custom automation work
 
 ## Key Features
 
+### Core Features
+
 - **Multi-profile proxy manager** — Create, update, and delete SOCKS5 or HTTP proxy profiles.
 - **Native VPN tunnel** — Android foreground service with status bar notification and connection telemetry.
 - **Credential security** — Metadata in `AsyncStorage`, secrets in `SecureStore` (Keychain on iOS).
 - **Remote automation** — Full control via `adb` broadcast intents; designed for STF/device-farm workflows.
 - **React Native UI** — Zustand-powered state management, modern screens, realtime connection stats.
+
+### 🆕 New Features (v1.0)
+
+- **Comprehensive Logging System** 🔍
+
+  - Multi-level logging (debug, info, warn, error, critical)
+  - Real-time log viewer with filtering and search
+  - 30-day retention with automatic rotation
+  - Export logs for debugging and support
+  - Categorized logging (VPN, network, storage, UI, app)
+  - [Learn more →](./docs/IMPLEMENTATION_GUIDE.md#logging-system)
+
+- **Dark Mode** 🌙
+  - Full theme system with light and dark modes
+  - System theme detection (follows device settings)
+  - WCAG AA compliant color contrast
+  - AMOLED-optimized (true black backgrounds)
+  - Smooth theme switching across all screens
+  - [Learn more →](./docs/IMPLEMENTATION_GUIDE.md#dark-mode)
 
 ---
 
@@ -175,6 +196,48 @@ open CBVVPN.xcworkspace       # Configure Network Extension in Xcode
 - **Roadmap**: enhanced error analytics, multi-proxy rotation, UI polish.
 
 Track ongoing work in `tasks.md` inside `.kiro/specs/` (private project planning).
+
+---
+
+## 📚 Documentation
+
+Comprehensive documentation is available for all features:
+
+### Getting Started
+
+- **[Quick Start Guide](./docs/QUICK_START.md)** - Get up and running quickly
+  - Installation steps
+  - First launch guide
+  - Feature overview
+  - Troubleshooting
+
+### Developer Guides
+
+- **[Implementation Guide](./docs/IMPLEMENTATION_GUIDE.md)** - Technical documentation
+
+  - Logging System API
+  - Dark Mode API
+  - Code examples
+  - Best practices
+
+- **[Feature Design Document](./docs/FEATURE_DESIGN.md)** - Architecture & design
+  - System architecture
+  - Data flow diagrams
+  - Storage strategies
+  - Performance considerations
+
+### Testing
+
+- **[Testing Guide](./docs/TESTING_GUIDE.md)** - Comprehensive test scenarios
+  - Manual testing checklists
+  - Feature validation
+  - Performance testing
+  - Known issues
+
+### Additional Resources
+
+- **[ADB Intent Commands](./ADB_INTENT_COMMANDS.md)** - Remote automation guide
+- **[Contributing Guide](./CONTRIBUTING.md)** - How to contribute
 
 ---
 

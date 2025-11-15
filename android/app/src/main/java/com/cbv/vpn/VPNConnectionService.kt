@@ -5,15 +5,15 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import java.io.FileInputStream
@@ -24,37 +24,41 @@ import kotlin.concurrent.thread
 import org.json.JSONObject
 
 class VPNConnectionService : VpnService() {
-    
+
     private val TAG = "VPNConnectionService"
     private val NOTIFICATION_ID = 1
     private val CHANNEL_ID = "VPN_SERVICE_CHANNEL"
-    
+
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnThread: Thread? = null
     private var isRunning = false
-    
+
     private var proxyServer: String = ""
     private var proxyServerIP: String = ""
     private var proxyPort: Int = 0
     private var proxyUsername: String = ""
     private var proxyPassword: String = ""
     private var proxyType: String = "socks5"
-    
+
     private var connectionManager: ConnectionManager? = null
     private var udpHandler: UDPHandler? = null
-    
+
     private var connectionStartTime: Long = 0L
     private var bytesUp: Long = 0L
     private var bytesDown: Long = 0L
     private var publicIp: String? = null
-    
-    private val bytesReceivedReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-            val bytes = intent?.getLongExtra("bytes", 0L) ?: 0L
-            bytesDown += bytes
-        }
-    }
-    
+
+    private val bytesReceivedReceiver =
+            object : android.content.BroadcastReceiver() {
+                override fun onReceive(
+                        context: android.content.Context?,
+                        intent: android.content.Intent?
+                ) {
+                    val bytes = intent?.getLongExtra("bytes", 0L) ?: 0L
+                    bytesDown += bytes
+                }
+            }
+
     companion object {
         const val ACTION_VPN_STATUS = "com.cbv.vpn.VPN_STATUS"
         const val EXTRA_STATUS = "status"
@@ -77,45 +81,49 @@ class VPNConnectionService : VpnService() {
         Log.d(TAG, "VPNConnectionService created")
         createNotificationChannel()
         // Check notification permission on Android 13+
-        val notifAllowed = try {
-            if (Build.VERSION.SDK_INT >= 33) {
-                val granted = ContextCompat.checkSelfPermission(
-                    this,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                if (!granted) {
-                    Log.w(TAG, "POST_NOTIFICATIONS not granted on API>=33")
+        val notifAllowed =
+                try {
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        val granted =
+                                ContextCompat.checkSelfPermission(
+                                        this,
+                                        android.Manifest.permission.POST_NOTIFICATIONS
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        if (!granted) {
+                            Log.w(TAG, "POST_NOTIFICATIONS not granted on API>=33")
+                        }
+                        granted
+                    } else {
+                        NotificationManagerCompat.from(this).areNotificationsEnabled()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Unable to check notification permission: ${e.message}")
+                    true
                 }
-                granted
-            } else {
-                NotificationManagerCompat.from(this).areNotificationsEnabled()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Unable to check notification permission: ${e.message}")
-            true
-        }
 
         if (!notifAllowed) {
             Log.e(TAG, "Cannot start foreground: notification permission missing")
             try {
-                broadcastStatus(STATUS_DISCONNECTED, force = true, error = "Notification permission required on Android 13+")
+                broadcastStatus(
+                        STATUS_DISCONNECTED,
+                        force = true,
+                        error = "Notification permission required on Android 13+"
+                )
                 // Ask RN layer to request permission and bring app to foreground
                 val reqIntent = Intent("com.cbv.vpn.REQUEST_NOTIF_PERMISSION")
-                androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(this).sendBroadcast(reqIntent)
+                androidx.localbroadcastmanager.content.LocalBroadcastManager.getInstance(this)
+                        .sendBroadcast(reqIntent)
             } catch (_: Exception) {}
             stopSelf()
             return
         }
 
         val notification = createNotification("VPN Service")
-        val fgsType = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC else 0
+        val fgsType =
+                if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                else 0
         try {
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                notification,
-                fgsType
-            )
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, fgsType)
         } catch (e: Exception) {
             Log.w(TAG, "ServiceCompat.startForeground failed: ${e.message}")
             try {
@@ -127,16 +135,16 @@ class VPNConnectionService : VpnService() {
                 return
             }
         }
-        
+
         // Register receiver for bytes received from connections via LocalBroadcastManager
         val filter = android.content.IntentFilter("com.cbv.vpn.BYTES_RECEIVED")
         LocalBroadcastManager.getInstance(this).registerReceiver(bytesReceivedReceiver, filter)
     }
-    
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent != null) {
             val action = intent.getStringExtra("action")
-            
+
             if (action == COMMAND_STOP) {
                 stopVPN()
                 return START_NOT_STICKY
@@ -146,7 +154,7 @@ class VPNConnectionService : VpnService() {
                 broadcastStatus(currentStatus, force = true)
                 return START_NOT_STICKY
             }
-            
+
             proxyServer = intent.getStringExtra("server") ?: ""
             proxyServerIP = intent.getStringExtra("serverIP") ?: proxyServer
             proxyPort = intent.getIntExtra("port", 0)
@@ -165,6 +173,54 @@ class VPNConnectionService : VpnService() {
             }
 
             startVPN()
+        } else {
+            // Service restarted by system - check if auto-reconnect is enabled
+            Log.d(TAG, "🔄 Service restarted by system, checking auto-reconnect...")
+
+            if (!isRunning) {
+                val prefs = getSharedPreferences("vpn_prefs", MODE_PRIVATE)
+                val autoConnectEnabled = prefs.getBoolean("auto_connect_enabled", false)
+
+                if (autoConnectEnabled) {
+                    Log.d(TAG, "✅ Auto-reconnect enabled, attempting to reconnect...")
+
+                    val lastProfileId = prefs.getString("last_connected_profile_id", null)
+                    if (lastProfileId != null) {
+                        Log.d(TAG, "📋 Reconnecting to last profile: $lastProfileId")
+
+                        // Load profile and reconnect
+                        try {
+                            val profilesStr = prefs.getString("profiles", "[]")
+                            val profiles = org.json.JSONArray(profilesStr ?: "[]")
+
+                            for (i in 0 until profiles.length()) {
+                                val profile = profiles.getJSONObject(i)
+                                if (profile.getString("id") == lastProfileId) {
+                                    proxyServer = profile.getString("host")
+                                    proxyServerIP = profile.optString("serverIP", proxyServer)
+                                    proxyPort = profile.getInt("port")
+                                    proxyUsername = profile.optString("username", "")
+                                    proxyPassword = profile.optString("password", "")
+                                    proxyType = profile.optString("type", "socks5")
+
+                                    Log.d(
+                                            TAG,
+                                            "🚀 Auto-reconnecting to ${profile.getString("name")}"
+                                    )
+                                    startVPN()
+                                    break
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ Error during auto-reconnect: ${e.message}", e)
+                        }
+                    } else {
+                        Log.d(TAG, "⚠️ No last connected profile for auto-reconnect")
+                    }
+                } else {
+                    Log.d(TAG, "⏭️ Auto-reconnect disabled")
+                }
+            }
         }
         return START_STICKY
     }
@@ -174,66 +230,70 @@ class VPNConnectionService : VpnService() {
             Log.w(TAG, "VPN already running")
             return
         }
-        
+
         try {
             updateNotification("Connecting...")
-            
+
             val builder = Builder()
             builder.setSession("CBV VPN")
             builder.addAddress("10.0.0.2", 24)
-            
-            builder.addRoute("0.0.0.0", 1)  // 0.0.0.0/1 = 0.0.0.0 - 127.255.255.255
+
+            builder.addRoute("0.0.0.0", 1) // 0.0.0.0/1 = 0.0.0.0 - 127.255.255.255
             builder.addRoute("128.0.0.0", 1) // 128.0.0.0/1 = 128.0.0.0 - 255.255.255.255
-            
+
             // Use public DNS servers (not DNS-over-TLS)
-            builder.addDnsServer("1.1.1.1")  // Cloudflare
-            builder.addDnsServer("1.0.0.1")  // Cloudflare backup
-            builder.addDnsServer("8.8.8.8")  // Google
-            builder.addDnsServer("8.8.4.4")  // Google backup
-            
+            builder.addDnsServer("1.1.1.1") // Cloudflare
+            builder.addDnsServer("1.0.0.1") // Cloudflare backup
+            builder.addDnsServer("8.8.8.8") // Google
+            builder.addDnsServer("8.8.4.4") // Google backup
+
             builder.setMtu(1500)
-            builder.setBlocking(false)  // Non-blocking mode for better performance
+            builder.setBlocking(false) // Non-blocking mode for better performance
 
             try {
                 builder.addDisallowedApplication(packageName)
             } catch (e: PackageManager.NameNotFoundException) {
                 Log.e(TAG, "Failed to exclude application from VPN: ${e.message}")
             }
-            
+
             Log.d(TAG, "Attempting to establish VPN interface...")
             vpnInterface = builder.establish()
-            
+
             if (vpnInterface == null) {
                 // Check if VPN permission is granted
                 val prepareIntent = prepare(this)
                 if (prepareIntent != null) {
                     Log.e(TAG, "Failed to establish VPN interface - VPN permission not granted")
-                    broadcastStatus(STATUS_DISCONNECTED, error = "VPN permission not granted. Please open the app and grant VPN permission.")
+                    broadcastStatus(
+                            STATUS_DISCONNECTED,
+                            error =
+                                    "VPN permission not granted. Please open the app and grant VPN permission."
+                    )
                 } else {
                     Log.e(TAG, "Failed to establish VPN interface - Unknown reason")
-                    broadcastStatus(STATUS_DISCONNECTED, error = "Failed to establish VPN interface")
+                    broadcastStatus(
+                            STATUS_DISCONNECTED,
+                            error = "Failed to establish VPN interface"
+                    )
                 }
                 stopSelf()
                 return
             }
-            
+
             Log.d(TAG, "✅ VPN interface established successfully")
-            
+
             connectionStartTime = System.currentTimeMillis()
             isRunning = true
             publicIp = null
 
             broadcastStatus(STATUS_CONNECTING, force = true)
-            
+
             // Start packet forwarding thread
-            vpnThread = thread(start = true) {
-                runVPNLoop()
-            }
-            
+            vpnThread = thread(start = true) { runVPNLoop() }
+
             updateNotification("Connected to $proxyServer (handshaking)")
             broadcastStatus(STATUS_HANDSHAKING, force = true)
             fetchPublicIpAsync()
-
         } catch (e: Exception) {
             Log.e(TAG, "Exception in startVPN(): ${e.message}")
             broadcastStatus(STATUS_DISCONNECTED, force = true, error = e.message)
@@ -246,60 +306,61 @@ class VPNConnectionService : VpnService() {
             val inputStream = FileInputStream(vpnInterface!!.fileDescriptor)
             val outputStream = FileOutputStream(vpnInterface!!.fileDescriptor)
             val buffer = ByteArray(32767)
-            
+
             // Initialize connection manager with SOCKS5 handler
-            val proxyHandler = if (proxyType.lowercase() in listOf("socks5", "socks")) {
-                SOCKS5ProxyHandler(
-                    proxyServerIP,
-                    proxyPort,
-                    if (proxyUsername.isNotEmpty()) proxyUsername else null,
-                    if (proxyPassword.isNotEmpty()) proxyPassword else null
-                )
-            } else {
-                HTTPProxyHandler(
-                    proxyServerIP,
-                    proxyPort,
-                    if (proxyUsername.isNotEmpty()) proxyUsername else null,
-                    if (proxyPassword.isNotEmpty()) proxyPassword else null
-                )
-            }
-            
+            val proxyHandler =
+                    if (proxyType.lowercase() in listOf("socks5", "socks")) {
+                        SOCKS5ProxyHandler(
+                                proxyServerIP,
+                                proxyPort,
+                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
+                                if (proxyPassword.isNotEmpty()) proxyPassword else null
+                        )
+                    } else {
+                        HTTPProxyHandler(
+                                proxyServerIP,
+                                proxyPort,
+                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
+                                if (proxyPassword.isNotEmpty()) proxyPassword else null
+                        )
+                    }
+
             connectionManager = ConnectionManager(this, outputStream, proxyHandler)
             udpHandler = UDPHandler(this, outputStream)
-            
+
             var packetCount = 0
-            
+
             while (isRunning) {
                 try {
                     val length = inputStream.read(buffer)
                     if (length > 0) {
                         packetCount++
                         bytesUp += length
-                        
+
                         // Check if packet has TUN header (4 bytes: flags + protocol)
                         var offset = 0
                         if (length > 4) {
                             val firstByte = buffer[0].toInt() and 0xFF
                             val version = (firstByte shr 4) and 0x0F
-                            
+
                             if (version != 4) {
                                 offset = 4
                             }
                         }
-                        
+
                         // Parse packet (skip TUN header if present)
                         val parser = PacketParser(buffer, length, offset)
-                        
+
                         if (!parser.isValid) {
                             Log.w(TAG, "❌ Invalid packet at offset=$offset, length=$length")
                             continue
                         }
-                        
+
                         // Log first few packets
                         if (packetCount <= 5) {
                             parser.logSummary()
                         }
-                        
+
                         if (parser.isTCP()) {
                             connectionManager?.handlePacket(parser)
                         } else if (parser.isUDP()) {
@@ -307,10 +368,13 @@ class VPNConnectionService : VpnService() {
                             if (parser.destPort == 53) {
                                 udpHandler?.handleDNSQuery(parser)
                             } else if (packetCount <= 5) {
-                                Log.d(TAG, "⚠️ Non-DNS UDP not supported: ${parser.getConnectionKey()}")
+                                Log.d(
+                                        TAG,
+                                        "⚠️ Non-DNS UDP not supported: ${parser.getConnectionKey()}"
+                                )
                             }
                         }
-                        
+
                         // Broadcast status update every 100 packets
                         if (packetCount % 100 == 0) {
                             broadcastStatus(STATUS_CONNECTED)
@@ -323,7 +387,6 @@ class VPNConnectionService : VpnService() {
                     break
                 }
             }
-            
         } catch (e: Exception) {
             Log.e(TAG, "Fatal error in VPN loop: ${e.message}")
         } finally {
@@ -335,32 +398,32 @@ class VPNConnectionService : VpnService() {
 
     private fun stopVPN() {
         isRunning = false
-        
+
         connectionManager?.closeAll()
         connectionManager = null
-        
+
         vpnThread?.interrupt()
         vpnThread = null
-        
+
         vpnInterface?.close()
         vpnInterface = null
-        
+
         broadcastStatus(STATUS_DISCONNECTED, force = true)
-        
+
         connectionStartTime = 0L
         bytesUp = 0L
         bytesDown = 0L
         publicIp = null
-        
+
         stopForeground(true)
         stopSelf()
     }
-    
+
     private fun broadcastStatus(
-        status: String,
-        force: Boolean = false,
-        error: String? = null,
-        publicIpOverride: String? = null
+            status: String,
+            force: Boolean = false,
+            error: String? = null,
+            publicIpOverride: String? = null
     ) {
         val intent = Intent(ACTION_VPN_STATUS)
         intent.putExtra(EXTRA_STATUS, status)
@@ -375,7 +438,7 @@ class VPNConnectionService : VpnService() {
         if (!ipToSend.isNullOrEmpty()) {
             intent.putExtra(EXTRA_PUBLIC_IP, ipToSend)
         }
-        
+
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
@@ -387,7 +450,7 @@ class VPNConnectionService : VpnService() {
                 Thread.sleep(2000)
 
                 broadcastStatus(STATUS_HANDSHAKING, force = true)
-                
+
                 val fetchedIp = fetchPublicIpViaProxy()
                 if (fetchedIp != null) {
                     publicIp = fetchedIp
@@ -413,36 +476,40 @@ class VPNConnectionService : VpnService() {
         try {
             Log.d(TAG, "🌐 Fetching public IP via proxy...")
             Log.d(TAG, "📍 Proxy details: $proxyType://$proxyServerIP:$proxyPort")
-            
+
             // Create socket and connect to proxy
             socket = java.net.Socket()
             socket.soTimeout = 10000
             socket.tcpNoDelay = true
             socket.keepAlive = true
-            
+
             if (!protect(socket)) {
-                Log.w(TAG, "⚠️ Failed to protect public IP socket (may still work if already protected)")
+                Log.w(
+                        TAG,
+                        "⚠️ Failed to protect public IP socket (may still work if already protected)"
+                )
             } else {
                 Log.d(TAG, "✅ Socket protected successfully")
             }
-            
+
             // Create proxy handler
-            val proxyHandler = if (proxyType.lowercase() in listOf("socks5", "socks")) {
-                SOCKS5ProxyHandler(
-                    proxyServerIP,
-                    proxyPort,
-                    if (proxyUsername.isNotEmpty()) proxyUsername else null,
-                    if (proxyPassword.isNotEmpty()) proxyPassword else null
-                )
-            } else {
-                HTTPProxyHandler(
-                    proxyServerIP,
-                    proxyPort,
-                    if (proxyUsername.isNotEmpty()) proxyUsername else null,
-                    if (proxyPassword.isNotEmpty()) proxyPassword else null
-                )
-            }
-            
+            val proxyHandler =
+                    if (proxyType.lowercase() in listOf("socks5", "socks")) {
+                        SOCKS5ProxyHandler(
+                                proxyServerIP,
+                                proxyPort,
+                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
+                                if (proxyPassword.isNotEmpty()) proxyPassword else null
+                        )
+                    } else {
+                        HTTPProxyHandler(
+                                proxyServerIP,
+                                proxyPort,
+                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
+                                if (proxyPassword.isNotEmpty()) proxyPassword else null
+                        )
+                    }
+
             val targetHost = "api.ipify.org"
             val targetPort = 443
 
@@ -457,9 +524,11 @@ class VPNConnectionService : VpnService() {
             Log.d(TAG, "✅ Connected to $targetHost via proxy, performing TLS handshake...")
 
             val sslSocketFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-            sslSocket = sslSocketFactory.createSocket(socket, targetHost, targetPort, true) as SSLSocket
+            sslSocket =
+                    sslSocketFactory.createSocket(socket, targetHost, targetPort, true) as SSLSocket
             sslSocket.soTimeout = 10000
-            sslSocket.enabledProtocols = sslSocket.supportedProtocols.filter { it.startsWith("TLS") }.toTypedArray()
+            sslSocket.enabledProtocols =
+                    sslSocket.supportedProtocols.filter { it.startsWith("TLS") }.toTypedArray()
 
             sslSocket.startHandshake()
             Log.d(TAG, "🤝 TLS handshake completed with $targetHost")
@@ -477,7 +546,10 @@ class VPNConnectionService : VpnService() {
             output.write(request.toByteArray(Charsets.UTF_8))
             output.flush()
 
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(sslSocket.inputStream, Charsets.UTF_8))
+            val reader =
+                    java.io.BufferedReader(
+                            java.io.InputStreamReader(sslSocket.inputStream, Charsets.UTF_8)
+                    )
 
             var line: String?
             var contentLength = 0
@@ -487,45 +559,53 @@ class VPNConnectionService : VpnService() {
                 if (line!!.startsWith("Content-Length:", ignoreCase = true)) {
                     contentLength = line!!.substring(15).trim().toIntOrNull() ?: 0
                 }
-                if (line!!.startsWith("Transfer-Encoding:", ignoreCase = true) && line!!.contains("chunked", true)) {
+                if (line!!.startsWith("Transfer-Encoding:", ignoreCase = true) &&
+                                line!!.contains("chunked", true)
+                ) {
                     isChunked = true
                 }
             }
 
-            val body = when {
-                contentLength > 0 -> {
-                    val buffer = CharArray(contentLength)
-                    var totalRead = 0
-                    while (totalRead < contentLength) {
-                        val read = reader.read(buffer, totalRead, contentLength - totalRead)
-                        if (read == -1) break
-                        totalRead += read
-                    }
-                    String(buffer, 0, totalRead)
-                }
-                isChunked -> {
-                    val sb = StringBuilder()
-                    while (true) {
-                        val chunkSizeLine = reader.readLine() ?: break
-                        val chunkSize = chunkSizeLine.trim().toIntOrNull(16) ?: break
-                        if (chunkSize == 0) {
-                            reader.readLine() // consume trailing CRLF
-                            break
+            val body =
+                    when {
+                        contentLength > 0 -> {
+                            val buffer = CharArray(contentLength)
+                            var totalRead = 0
+                            while (totalRead < contentLength) {
+                                val read = reader.read(buffer, totalRead, contentLength - totalRead)
+                                if (read == -1) break
+                                totalRead += read
+                            }
+                            String(buffer, 0, totalRead)
                         }
-                        val chunkBuffer = CharArray(chunkSize)
-                        var readTotal = 0
-                        while (readTotal < chunkSize) {
-                            val read = reader.read(chunkBuffer, readTotal, chunkSize - readTotal)
-                            if (read == -1) break
-                            readTotal += read
+                        isChunked -> {
+                            val sb = StringBuilder()
+                            while (true) {
+                                val chunkSizeLine = reader.readLine() ?: break
+                                val chunkSize = chunkSizeLine.trim().toIntOrNull(16) ?: break
+                                if (chunkSize == 0) {
+                                    reader.readLine() // consume trailing CRLF
+                                    break
+                                }
+                                val chunkBuffer = CharArray(chunkSize)
+                                var readTotal = 0
+                                while (readTotal < chunkSize) {
+                                    val read =
+                                            reader.read(
+                                                    chunkBuffer,
+                                                    readTotal,
+                                                    chunkSize - readTotal
+                                            )
+                                    if (read == -1) break
+                                    readTotal += read
+                                }
+                                sb.append(chunkBuffer, 0, readTotal)
+                                reader.readLine() // CRLF after chunk
+                            }
+                            sb.toString()
                         }
-                        sb.append(chunkBuffer, 0, readTotal)
-                        reader.readLine() // CRLF after chunk
+                        else -> reader.readText()
                     }
-                    sb.toString()
-                }
-                else -> reader.readText()
-            }
 
             Log.d(TAG, "📡 Response from $targetHost: ${body.trim()}")
 
@@ -539,7 +619,6 @@ class VPNConnectionService : VpnService() {
 
             Log.e(TAG, "❌ Failed to parse public IP from response: ${body.trim()}")
             return null
-
         } catch (e: java.net.SocketTimeoutException) {
             Log.e(TAG, "❌ Timeout fetching public IP via proxy: ${e.message}")
             Log.e(TAG, "❌ Proxy may be slow or blocking the request")
@@ -554,7 +633,10 @@ class VPNConnectionService : VpnService() {
             e.printStackTrace()
             return null
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error fetching public IP via proxy: ${e.javaClass.simpleName} - ${e.message}")
+            Log.e(
+                    TAG,
+                    "❌ Error fetching public IP via proxy: ${e.javaClass.simpleName} - ${e.message}"
+            )
             e.printStackTrace()
             return null
         } finally {
@@ -566,57 +648,75 @@ class VPNConnectionService : VpnService() {
             }
         }
     }
-    
+
     private fun getConnectionDuration(): Long {
-        return if (connectionStartTime == 0L) 0L else System.currentTimeMillis() - connectionStartTime
+        return if (connectionStartTime == 0L) 0L
+        else System.currentTimeMillis() - connectionStartTime
     }
-    
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "VPN Service",
-                NotificationManager.IMPORTANCE_LOW
-            )
+            val channel =
+                    NotificationChannel(
+                            CHANNEL_ID,
+                            "VPN Service",
+                            NotificationManager.IMPORTANCE_LOW
+                    )
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
     }
-    
+
     private fun createNotification(status: String): Notification {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("CBV VPN")
-            .setContentText(status)
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .build()
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+
+        // Create stop intent
+        val stopIntent = Intent(this, VPNConnectionService::class.java)
+        stopIntent.putExtra("action", COMMAND_STOP)
+        val stopPendingIntent =
+                PendingIntent.getService(
+                        this,
+                        1,
+                        stopIntent,
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+
+        // Only show stop button when VPN is fully connected (not connecting or handshaking)
+        val isConnected = status.startsWith("Connected to") && !status.contains("handshaking")
+
+        val builder =
+                NotificationCompat.Builder(this, CHANNEL_ID)
+                        .setContentTitle("CBV VPN")
+                        .setContentText(status)
+                        .setSmallIcon(android.R.drawable.ic_lock_lock)
+                        .setContentIntent(pendingIntent)
+                        .setOngoing(true)
+
+        // Only add stop button when VPN is connected
+        if (isConnected) {
+            builder.addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
+        }
+
+        return builder.build()
     }
-    
+
     private fun updateNotification(status: String) {
         val notification = createNotification(status)
         val manager = getSystemService(NotificationManager::class.java)
         manager?.notify(NOTIFICATION_ID, notification)
     }
-    
+
     override fun onDestroy() {
         super.onDestroy()
-            try {
-                LocalBroadcastManager.getInstance(this).unregisterReceiver(bytesReceivedReceiver)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error unregistering receiver: ${e.message}")
-            }
+        try {
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(bytesReceivedReceiver)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error unregistering receiver: ${e.message}")
+        }
         stopVPN()
     }
-    
+
     override fun onRevoke() {
         super.onRevoke()
         stopVPN()
