@@ -1,273 +1,302 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from "react";
 import {
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
-    StyleSheet,
-    RefreshControl,
-    Alert,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useVPNStore } from '../store';
-import { ProxyProfile } from '../types';
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+  RefreshControl,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { useVPNStore } from "../store";
+import { ProxyProfile } from "../types";
+import { useThemedStyles } from "../hooks/useThemedStyles";
+import { useTheme } from "../hooks/useTheme";
+import { useCustomModal } from "../hooks";
+import { CustomModal } from "../components/CustomModal";
+import type { Theme } from "../types/theme";
 
 interface ProfileListScreenProps {
-    navigation: any;
+  navigation: any;
 }
 
-export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({ navigation }) => {
-    const {
-        profiles,
-        activeProfileId,
-        isLoading,
-        loadProfiles,
-        deleteProfile,
-        selectProfile,
-    } = useVPNStore();
+export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
+  navigation,
+}) => {
+  const styles = useThemedStyles(createStyles);
+  const { colors } = useTheme();
+  const modal = useCustomModal();
 
-    useEffect(() => {
-        loadProfiles();
-    }, []);
+  const {
+    profiles,
+    activeProfileId,
+    isLoading,
+    loadProfiles,
+    deleteProfile,
+    selectProfile,
+  } = useVPNStore();
 
-    const handleRefresh = () => {
-        loadProfiles();
-    };
+  useEffect(() => {
+    loadProfiles();
+  }, []);
 
-    const handleAddProfile = () => {
-        navigation.navigate('ProfileForm');
-    };
+  const handleRefresh = () => {
+    loadProfiles();
+  };
 
-    const handleEditProfile = (profile: ProxyProfile) => {
-        navigation.navigate('ProfileForm', { profile });
-    };
+  const handleAddProfile = () => {
+    navigation.navigate("ProfileForm");
+  };
 
-    const handleDeleteProfile = (profile: ProxyProfile) => {
-        Alert.alert(
-            'Delete Profile',
-            `Are you sure you want to delete "${profile.name}"?`,
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            await deleteProfile(profile.id);
-                        } catch (error) {
-                            Alert.alert('Error', 'Failed to delete profile');
-                        }
-                    },
-                },
-            ]
-        );
-    };
+  const handleEditProfile = (profile: ProxyProfile) => {
+    navigation.navigate("ProfileForm", { profile });
+  };
 
-    const handleSelectProfile = async (profile: ProxyProfile) => {
+  const handleDeleteProfile = (profile: ProxyProfile) => {
+    modal.showConfirm(
+      "Delete Profile",
+      `Are you sure you want to delete "${profile.name}"?`,
+      async () => {
         try {
-            await selectProfile(profile.id);
-            // Navigate to Home tab instead of Connection screen
-            navigation.navigate('Home');
+          await deleteProfile(profile.id);
         } catch (error) {
-            Alert.alert('Error', 'Failed to select profile');
+          modal.showError("Error", "Failed to delete profile");
         }
-    };
+      },
+      undefined,
+      "Delete",
+      "Cancel"
+    );
+  };
 
-    const renderProfile = ({ item }: { item: ProxyProfile }) => {
-        const isActive = item.id === activeProfileId;
+  const handleSelectProfile = async (profile: ProxyProfile) => {
+    try {
+      await selectProfile(profile.id);
+      // Navigate to Home tab instead of Connection screen
+      navigation.navigate("Home");
+    } catch (error) {
+      modal.showError("Error", "Failed to select profile");
+    }
+  };
 
-        return (
-            <TouchableOpacity
-                style={[styles.profileItem, isActive && styles.activeProfileItem]}
-                onPress={() => handleSelectProfile(item)}
-            >
-                <View style={styles.profileInfo}>
-                    <View style={styles.profileHeader}>
-                        <Text style={styles.profileName}>{item.name}</Text>
-                        {isActive && (
-                            <View style={styles.activeIndicator}>
-                                <Text style={styles.activeText}>ACTIVE</Text>
-                            </View>
-                        )}
-                    </View>
-                    <Text style={styles.profileDetails}>
-                        {item.type.toUpperCase()} • {item.host}:{item.port}
-                    </Text>
-                    {item.username && (
-                        <Text style={styles.profileAuth}>🔐 Authenticated</Text>
-                    )}
-                </View>
-
-                <View style={styles.profileActions}>
-                    <TouchableOpacity
-                        style={styles.actionButton}
-                        onPress={() => handleEditProfile(item)}
-                    >
-                        <Text style={styles.actionButtonText}>Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.actionButton, styles.deleteButton]}
-                        onPress={() => handleDeleteProfile(item)}
-                    >
-                        <Text style={[styles.actionButtonText, styles.deleteButtonText]}>
-                            Delete
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-            </TouchableOpacity>
-        );
-    };
+  const renderProfile = ({ item }: { item: ProxyProfile }) => {
+    const isActive = item.id === activeProfileId;
 
     return (
-        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-            <View style={styles.header}>
-                <Text style={styles.title}>VPN Profiles</Text>
-                <TouchableOpacity style={styles.addButton} onPress={handleAddProfile}>
-                    <Text style={styles.addButtonText}>+ Add Profile</Text>
-                </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.profileItem, isActive && styles.activeProfileItem]}
+        onPress={() => handleSelectProfile(item)}
+      >
+        <View style={styles.profileInfo}>
+          <View style={styles.profileHeader}>
+            <Text style={styles.profileName}>{item.name}</Text>
+            {isActive && (
+              <View style={styles.activeIndicator}>
+                <Text style={styles.activeText}>ACTIVE</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.profileDetails}>
+            {item.type.toUpperCase()} • {item.host}:{item.port}
+          </Text>
+          {item.username && (
+            <View style={styles.profileAuth}>
+              <Ionicons
+                name="shield-checkmark"
+                size={14}
+                color={colors.status.success}
+                style={styles.authIcon}
+              />
+              <Text style={styles.profileAuthText}>Authenticated</Text>
             </View>
+          )}
+        </View>
 
-            <FlatList
-                data={profiles}
-                renderItem={renderProfile}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={styles.listContent}
-                refreshControl={
-                    <RefreshControl refreshing={isLoading} onRefresh={handleRefresh} />
-                }
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>No profiles yet</Text>
-                        <Text style={styles.emptySubtext}>
-                            Tap "Add Profile" to create your first VPN profile
-                        </Text>
-                    </View>
-                }
-            />
-        </SafeAreaView>
+        <View style={styles.profileActions}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => handleEditProfile(item)}
+          >
+            <Text style={styles.actionButtonText}>Edit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.deleteButton]}
+            onPress={() => handleDeleteProfile(item)}
+          >
+            <Text style={[styles.actionButtonText, styles.deleteButtonText]}>
+              Delete
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
     );
+  };
+
+  return (
+    <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+      <View style={styles.header}>
+        <Text style={styles.title}>VPN Profiles</Text>
+        <TouchableOpacity style={styles.addButton} onPress={handleAddProfile}>
+          <Text style={styles.addButtonText}>+ Add Profile</Text>
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={profiles}
+        renderItem={renderProfile}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl refreshing={isLoading} onRefresh={handleRefresh} />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No profiles yet</Text>
+            <Text style={styles.emptySubtext}>
+              Tap "Add Profile" to create your first VPN profile
+            </Text>
+          </View>
+        }
+      />
+      <CustomModal
+        visible={modal.visible}
+        config={modal.config}
+        onDismiss={modal.hideModal}
+      />
+    </SafeAreaView>
+  );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: Theme) =>
+  StyleSheet.create({
     container: {
-        flex: 1,
-        backgroundColor: '#f5f5f5',
+      flex: 1,
+      backgroundColor: theme.colors.background.primary,
     },
     header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 16,
-        backgroundColor: '#fff',
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: theme.spacing.md,
+      backgroundColor: theme.colors.background.secondary,
     },
     title: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#333',
+      fontSize: theme.typography.fontSize.xl,
+      fontWeight: theme.typography.fontWeight.bold,
+      color: theme.colors.text.primary,
     },
     addButton: {
-        backgroundColor: '#007AFF',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 8,
+      backgroundColor: theme.colors.interactive.primary,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+      borderRadius: theme.borderRadius.md,
     },
     addButtonText: {
-        color: '#fff',
-        fontSize: 16,
-        fontWeight: '600',
+      color: theme.colors.text.inverse,
+      fontSize: theme.typography.fontSize.md,
+      fontWeight: theme.typography.fontWeight.medium,
     },
     listContent: {
-        padding: 16,
+      padding: theme.spacing.md,
     },
     profileItem: {
-        backgroundColor: '#fff',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+      backgroundColor: theme.colors.background.secondary,
+      borderRadius: theme.borderRadius.lg,
+      padding: theme.spacing.md,
+      marginBottom: theme.spacing.md,
+      shadowColor: theme.colors.shadow.color,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: theme.colors.shadow.opacity,
+      shadowRadius: 4,
+      elevation: 3,
     },
     activeProfileItem: {
-        borderWidth: 2,
-        borderColor: '#4CAF50',
+      shadowColor: theme.colors.status.success,
+      shadowOffset: { width: 0, height: 0 },
+      shadowOpacity: 0.4,
+      shadowRadius: 8,
+      elevation: 6,
     },
     profileInfo: {
-        marginBottom: 12,
+      marginBottom: theme.spacing.md,
     },
     profileHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 4,
+      flexDirection: "row",
+      alignItems: "center",
+      marginBottom: theme.spacing.xs,
     },
     profileName: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#333',
-        flex: 1,
+      fontSize: theme.typography.fontSize.lg,
+      fontWeight: theme.typography.fontWeight.medium,
+      color: theme.colors.text.primary,
+      flex: 1,
     },
     activeIndicator: {
-        backgroundColor: '#4CAF50',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 4,
+      backgroundColor: theme.colors.status.success,
+      paddingHorizontal: theme.spacing.sm,
+      paddingVertical: theme.spacing.xs,
+      borderRadius: theme.borderRadius.sm,
     },
     activeText: {
-        color: '#fff',
-        fontSize: 12,
-        fontWeight: 'bold',
+      color: theme.colors.text.inverse,
+      fontSize: theme.typography.fontSize.xs,
+      fontWeight: theme.typography.fontWeight.bold,
     },
     profileDetails: {
-        fontSize: 14,
-        color: '#666',
-        marginBottom: 4,
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.secondary,
+      marginBottom: theme.spacing.xs,
     },
     profileAuth: {
-        fontSize: 12,
-        color: '#4CAF50',
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    authIcon: {
+      marginRight: theme.spacing.xs,
+    },
+    profileAuthText: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.status.success,
     },
     profileActions: {
-        flexDirection: 'row',
-        gap: 8,
+      flexDirection: "row",
+      gap: theme.spacing.sm,
     },
     actionButton: {
-        flex: 1,
-        backgroundColor: '#007AFF',
-        paddingVertical: 8,
-        borderRadius: 6,
-        alignItems: 'center',
+      flex: 1,
+      backgroundColor: theme.colors.interactive.primary,
+      paddingVertical: theme.spacing.sm,
+      borderRadius: theme.borderRadius.sm,
+      alignItems: "center",
     },
     actionButtonText: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '600',
+      color: theme.colors.text.inverse,
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.medium,
     },
     deleteButton: {
-        backgroundColor: '#fff',
-        borderWidth: 1,
-        borderColor: '#FF3B30',
+      backgroundColor: theme.colors.background.tertiary,
+      borderWidth: 1,
+      borderColor: theme.colors.border.primary,
     },
     deleteButtonText: {
-        color: '#FF3B30',
+      color: theme.colors.status.error,
     },
     emptyContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 60,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingVertical: 60,
     },
     emptyText: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#999',
-        marginBottom: 8,
+      fontSize: theme.typography.fontSize.lg,
+      fontWeight: theme.typography.fontWeight.medium,
+      color: theme.colors.text.tertiary,
+      marginBottom: theme.spacing.sm,
     },
     emptySubtext: {
-        fontSize: 14,
-        color: '#999',
-        textAlign: 'center',
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.tertiary,
+      textAlign: "center",
     },
-});
+  });

@@ -1,126 +1,219 @@
-import { useEffect } from 'react';
-import { PermissionsAndroid, Platform } from 'react-native';
-import { VPNModule, VPNModuleEmitter } from '../native';
-import { VPNStatusInfo } from '../types';
-import { useVPNStore } from '../store';
+import { useEffect } from "react";
+import { PermissionsAndroid, Platform } from "react-native";
+import { VPNModule, VPNModuleEmitter } from "../native";
+import { VPNStatusInfo } from "../types";
+import { useVPNStore } from "../store";
+import { useLogger } from "./useLogger";
 
 /**
  * Hook to listen to VPN events and update store
  */
 export const useVPNEvents = () => {
-    const { setVPNStatus, setError, loadProfiles, setProfileNotification, profiles, selectProfile } = useVPNStore();
+  const {
+    setVPNStatus,
+    setError,
+    loadProfiles,
+    setProfileNotification,
+    profiles,
+    selectProfile,
+  } = useVPNStore();
+  const { logInfo, logError, logDebug, logWarn } = useLogger({
+    defaultCategory: "vpn",
+  });
 
-    useEffect(() => {
-        // Listen for status changes
-        const statusSubscription = VPNModule.addStatusChangeListener(
-            (statusInfo: VPNStatusInfo) => {
-                console.log('VPN Status changed:', statusInfo);
-                setVPNStatus(statusInfo);
+  useEffect(() => {
+    logDebug("Setting up VPN event listeners");
+
+    // Listen for status changes
+    const statusSubscription = VPNModule.addStatusChangeListener(
+      (statusInfo: VPNStatusInfo) => {
+        logInfo("VPN status changed in hook", undefined, {
+          state: statusInfo.state,
+          isConnected: statusInfo.isConnected,
+        });
+
+        // Simple log for users
+        if (statusInfo.state === "connected") {
+          logInfo("✅ Proxy connected successfully");
+        } else if (statusInfo.state === "connecting") {
+          logInfo("🔄 Connecting proxy...");
+        } else if (statusInfo.state === "disconnected") {
+          logInfo("⚪ Proxy disconnected");
+        } else if (statusInfo.state === "error") {
+          logError("❌ Proxy connection error");
+        }
+
+        setVPNStatus(statusInfo);
+      }
+    );
+
+    // Listen for errors
+    const errorSubscription = VPNModule.addErrorListener((error: any) => {
+      const message =
+        typeof error === "string"
+          ? error
+          : error?.message || "Unknown VPN error";
+      logError("VPN error received in hook", undefined, new Error(message));
+
+      // Simple log for users
+      logError(`❌ Proxy connection error: ${message}`);
+
+      setError(message);
+    });
+
+    // Listen for profile updates from native module
+    const profileSubscription = VPNModule.addProfilesUpdatedListener(
+      async (payload) => {
+        logInfo("Profile updated event received", undefined, {
+          profileId: payload?.id,
+          profileName: payload?.name,
+          isUpdate: payload?.isUpdate,
+        });
+        await loadProfiles();
+
+        setProfileNotification({
+          id: payload?.id || "",
+          name: payload?.name || "Unnamed proxy",
+          host: payload?.host,
+          port: payload?.port,
+          type: payload?.type,
+          isUpdate: payload?.isUpdate,
+        });
+      }
+    );
+
+    // Listen for VPN permission required event
+    const permissionSubscription = VPNModule.addVPNPermissionRequiredListener(
+      async (payload) => {
+        logWarn("VPN permission required", undefined, {
+          profileId: payload?.profileId,
+          profileName: payload?.profileName,
+        });
+
+        // Reload profiles to ensure we have the latest
+        await loadProfiles();
+
+        // Auto-connect to the profile once permission is granted
+        // The profile should now be in the list
+        const profileId = payload?.profileId;
+        if (profileId) {
+          try {
+            const profile = profiles.find((p) => p.id === profileId);
+            if (profile) {
+              logInfo("Auto-connecting after permission grant", undefined, {
+                profileId,
+                profileName: profile.name,
+              });
+
+              // Simple log
+              logInfo(`🔄 Auto-reconnecting proxy: ${profile.name}`);
+
+              await VPNModule.startVPNWithProfile(
+                profile.name,
+                profile.host,
+                profile.port,
+                profile.type,
+                profile.username || "",
+                profile.password || "",
+                profile.dns1,
+                profile.dns2
+              );
             }
-        );
+          } catch (error) {
+            logError(
+              "Failed to auto-connect after permission",
+              undefined,
+              error as Error,
+              { profileId }
+            );
+          }
+        }
+      }
+    );
 
-        // Listen for errors
-        const errorSubscription = VPNModule.addErrorListener((error: any) => {
-            const message = typeof error === 'string' ? error : (error?.message || 'Unknown VPN error');
-            console.error('VPN Error:', message);
-            setError(message);
+    // Listen for active profile changed from native
+    const activeProfileSubscription = VPNModule.addActiveProfileChangedListener(
+      async (payload) => {
+        logInfo("Active profile changed from native", undefined, {
+          profileId: payload?.profileId,
+          profileName: payload?.profileName,
         });
+        const profileId = payload?.profileId;
+        if (profileId) {
+          // Update the active profile in store
+          await selectProfile(profileId);
+          logDebug("Active profile updated in store", undefined, { profileId });
+        }
+      }
+    );
 
-        // Listen for profile updates from native module
-        const profileSubscription = VPNModule.addProfilesUpdatedListener(async (payload) => {
-            console.log('📡 Received profilesUpdated event:', payload);
-            await loadProfiles();
-
-            setProfileNotification({
-                id: payload?.id || '',
-                name: payload?.name || 'Unnamed proxy',
-                host: payload?.host,
-                port: payload?.port,
-                type: payload?.type,
-                isUpdate: payload?.isUpdate,
-            });
-        });
-
-        // Listen for VPN permission required event
-        const permissionSubscription = VPNModule.addVPNPermissionRequiredListener(async (payload) => {
-            console.log('📡 VPN permission required for profile:', payload);
-            
-            // Reload profiles to ensure we have the latest
-            await loadProfiles();
-            
-            // Auto-connect to the profile once permission is granted
-            // The profile should now be in the list
-            const profileId = payload?.profileId;
-            if (profileId) {
-                try {
-                    const profile = profiles.find(p => p.id === profileId);
-                    if (profile) {
-                        console.log('🔄 Auto-connecting to profile after permission grant:', profile.name);
-                        await VPNModule.startVPNWithProfile(
-                            profile.name,
-                            profile.host,
-                            profile.port,
-                            profile.type,
-                            profile.username || '',
-                            profile.password || '',
-                            profile.dns1,
-                            profile.dns2
-                        );
-                    }
-                } catch (error) {
-                    console.error('Failed to auto-connect after permission:', error);
+    const notifPermissionSubscription = VPNModuleEmitter.addListener(
+      "notificationPermissionRequired",
+      async () => {
+        try {
+          logWarn("Notification permission required");
+          if (Platform.OS === "android") {
+            const granted = await PermissionsAndroid.request(
+              PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+            );
+            if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+              logInfo("Notification permission granted");
+              await loadProfiles();
+              const activeId = await VPNModule.getActiveProfileId();
+              if (activeId) {
+                const profile = profiles.find((p) => p.id === activeId);
+                if (profile) {
+                  logInfo(
+                    "Restarting VPN after notification permission",
+                    undefined,
+                    { profileId: activeId }
+                  );
+                  await VPNModule.startVPNWithProfile(
+                    profile.name,
+                    profile.host,
+                    profile.port,
+                    profile.type,
+                    profile.username || "",
+                    profile.password || "",
+                    profile.dns1,
+                    profile.dns2
+                  );
                 }
+              }
+            } else {
+              logWarn("Notification permission denied");
             }
-        });
+          }
+        } catch (e) {
+          logError(
+            "Failed to request notification permission",
+            undefined,
+            e as Error
+          );
+        }
+      }
+    );
 
-        // Listen for active profile changed from native
-        const activeProfileSubscription = VPNModule.addActiveProfileChangedListener(async (payload) => {
-            console.log('📡 Active profile changed from native:', payload);
-            const profileId = payload?.profileId;
-            if (profileId) {
-                // Update the active profile in store
-                await selectProfile(profileId);
-                console.log('✅ Active profile updated in store:', profileId);
-            }
-        });
-
-        const notifPermissionSubscription = VPNModuleEmitter.addListener('notificationPermissionRequired', async () => {
-            try {
-                if (Platform.OS === 'android') {
-                    const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-                    if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-                        await loadProfiles();
-                        const activeId = await VPNModule.getActiveProfileId();
-                        if (activeId) {
-                            const profile = profiles.find(p => p.id === activeId);
-                            if (profile) {
-                                await VPNModule.startVPNWithProfile(
-                                    profile.name,
-                                    profile.host,
-                                    profile.port,
-                                    profile.type,
-                                    profile.username || '',
-                                    profile.password || '',
-                                    profile.dns1,
-                                    profile.dns2
-                                );
-                            }
-                        }
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to request notification permission:', e);
-            }
-        });
-
-        // Cleanup subscriptions
-        return () => {
-            statusSubscription.remove();
-            errorSubscription.remove();
-            profileSubscription.remove();
-            permissionSubscription.remove();
-            activeProfileSubscription.remove();
-            notifPermissionSubscription.remove();
-        };
-    }, [setVPNStatus, setError, loadProfiles, setProfileNotification, profiles, selectProfile]);
+    // Cleanup subscriptions
+    return () => {
+      logDebug("Cleaning up VPN event listeners");
+      statusSubscription.remove();
+      errorSubscription.remove();
+      profileSubscription.remove();
+      permissionSubscription.remove();
+      activeProfileSubscription.remove();
+      notifPermissionSubscription.remove();
+    };
+  }, [
+    setVPNStatus,
+    setError,
+    loadProfiles,
+    setProfileNotification,
+    profiles,
+    selectProfile,
+    logInfo,
+    logError,
+    logDebug,
+    logWarn,
+  ]);
 };

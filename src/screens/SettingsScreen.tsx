@@ -1,249 +1,363 @@
-import React from 'react';
+/**
+ * SettingsScreen - App settings with theme toggle
+ *
+ * Features:
+ * - Theme mode selection (Light/Dark/System)
+ * - App settings (auto-connect, notifications)
+ * - Debug tools (logs viewer, clear cache)
+ * - App version info
+ * - Full dark mode support
+ */
+
+import React, { useState, useCallback, useEffect } from "react";
 import {
-    View,
-    Text,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-    Switch,
-    Alert,
-    Linking,
-    Platform,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+  View,
+  ScrollView,
+  TouchableOpacity,
+  Platform,
+  StyleSheet,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { useThemedStyles } from "../hooks/useThemedStyles";
+import { useTheme } from "../hooks/useTheme";
+import { useCustomModal } from "../hooks";
+import { CustomModal } from "../components/CustomModal";
+import {
+  ThemedView,
+  ThemedText,
+  ThemedCard,
+  ThemedSwitch,
+  ThemedDivider,
+  ThemedSettingRow,
+  ThemedSectionHeader,
+} from "../components/ThemedComponents";
+import { Ionicons } from "@expo/vector-icons";
+import type { Theme, ThemeMode } from "../types/theme";
+import { VPNModule } from "../native/VPNModule";
 
-export const SettingsScreen: React.FC = () => {
-    const [autoConnect, setAutoConnect] = React.useState(false);
-    const [notifications, setNotifications] = React.useState(true);
-    const [darkMode, setDarkMode] = React.useState(false);
+interface SettingsScreenProps {
+  navigation?: any;
+}
 
-    const handleOpenVPNSettings = async () => {
-        if (Platform.OS !== 'android') {
-            Alert.alert(
-                'Not Supported',
-                'Always-on VPN configuration is only available on Android devices.'
-            );
-            return;
-        }
+export const SettingsScreen: React.FC<SettingsScreenProps> = ({
+  navigation,
+}) => {
+  const styles = useThemedStyles(createStyles);
+  const { theme, colors, themeMode, setThemeMode } = useTheme();
+  const modal = useCustomModal();
 
-        try {
-            const sendIntent = (Linking as unknown as { sendIntent?: (action: string) => Promise<void> }).sendIntent;
-            if (typeof sendIntent === 'function') {
-                await sendIntent('android.settings.VPN_SETTINGS');
-                return;
-            }
+  // App settings state (you can move these to a settings store later)
+  const [autoConnect, setAutoConnect] = useState(false);
+  const [notifications, setNotifications] = useState(true);
+  const [isLoadingAutoConnect, setIsLoadingAutoConnect] = useState(true);
 
-            const canOpen = await Linking.canOpenURL('android.settings.VPN_SETTINGS');
-            if (canOpen) {
-                await Linking.openURL('android.settings.VPN_SETTINGS');
-                return;
-            }
-
-            await Linking.openSettings();
-        } catch (error) {
-            console.warn('Failed to open VPN settings', error);
-            Alert.alert(
-                'Unable to open settings',
-                'Please open VPN settings manually to configure Always-on VPN.'
-            );
-        }
+  // Load auto-connect preference on mount
+  useEffect(() => {
+    const loadAutoConnectPreference = async () => {
+      try {
+        const enabled = await VPNModule.getAutoConnectEnabled();
+        setAutoConnect(enabled);
+      } catch (error) {
+        console.error("Failed to load auto-connect preference:", error);
+        modal.showError("Error", "Failed to load auto-connect setting");
+      } finally {
+        setIsLoadingAutoConnect(false);
+      }
     };
 
-    const handleClearData = () => {
-        Alert.alert(
-            'Clear All Data',
-            'This will delete all profiles and settings. Are you sure?',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Clear',
-                    style: 'destructive',
-                    onPress: () => {
-                        Alert.alert('Success', 'All data cleared');
-                    },
-                },
-            ]
-        );
-    };
+    loadAutoConnectPreference();
+  }, [modal]);
 
-    return (
-        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-            <View style={styles.header}>
-                <Text style={styles.title}>Settings</Text>
-            </View>
+  // Handle auto-connect toggle
+  const handleAutoConnectChange = useCallback(
+    async (value: boolean) => {
+      try {
+        setAutoConnect(value);
+        await VPNModule.setAutoConnectEnabled(value);
+      } catch (error) {
+        console.error("Failed to save auto-connect preference:", error);
+        // Revert the toggle on error
+        setAutoConnect(!value);
+        modal.showError("Error", "Failed to save auto-connect setting");
+      }
+    },
+    [modal]
+  );
 
-            <ScrollView style={styles.content}>
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Connection</Text>
+  // Handle theme mode change - memoized to prevent recreation on each render
+  const handleThemeModeChange = useCallback(
+    async (mode: ThemeMode) => {
+      try {
+        await setThemeMode(mode);
+      } catch (error) {
+        modal.showError("Error", "Failed to change theme mode");
+      }
+    },
+    [setThemeMode, modal]
+  );
 
-                    <View style={styles.settingItem}>
-                        <View style={styles.settingInfo}>
-                            <Text style={styles.settingLabel}>Auto-connect on startup</Text>
-                            <Text style={styles.settingDescription}>
-                                Automatically connect to last used profile
-                            </Text>
-                        </View>
-                        <Switch
-                            value={autoConnect}
-                            onValueChange={setAutoConnect}
-                            trackColor={{ false: '#ddd', true: '#4CAF50' }}
-                        />
-                    </View>
+  // Handle view logs - memoized to prevent recreation on each render
+  const handleViewLogs = useCallback(() => {
+    if (navigation) {
+      navigation.navigate("Logs");
+    }
+  }, [navigation]);
 
-                    <View style={styles.settingItem}>
-                        <View style={styles.settingInfo}>
-                            <Text style={styles.settingLabel}>Notifications</Text>
-                            <Text style={styles.settingDescription}>
-                                Show connection status notifications
-                            </Text>
-                        </View>
-                        <Switch
-                            value={notifications}
-                            onValueChange={setNotifications}
-                            trackColor={{ false: '#ddd', true: '#4CAF50' }}
-                        />
-                    </View>
-
-                    <TouchableOpacity style={styles.settingItem} onPress={handleOpenVPNSettings}>
-                        <View style={styles.settingInfo}>
-                            <Text style={styles.settingLabel}>Configure Always-on VPN</Text>
-                            <Text style={styles.settingDescription}>
-                                Open system VPN settings to enable Always-on VPN
-                            </Text>
-                        </View>
-                        <Ionicons name="open-outline" size={22} color="#007AFF" />
-                    </TouchableOpacity>
-                </View>
-
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Appearance</Text>
-
-                    <View style={styles.settingItem}>
-                        <View style={styles.settingInfo}>
-                            <Text style={styles.settingLabel}>Dark Mode</Text>
-                            <Text style={styles.settingDescription}>
-                                Use dark theme (Coming soon)
-                            </Text>
-                        </View>
-                        <Switch
-                            value={darkMode}
-                            onValueChange={setDarkMode}
-                            disabled
-                            trackColor={{ false: '#ddd', true: '#4CAF50' }}
-                        />
-                    </View>
-                </View>
-
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Data</Text>
-
-                    <TouchableOpacity style={styles.dangerButton} onPress={handleClearData}>
-                        <Text style={styles.dangerButtonText}>Clear All Data</Text>
-                    </TouchableOpacity>
-                </View>
-
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>About</Text>
-
-                    <View style={styles.infoItem}>
-                        <Text style={styles.infoLabel}>Version</Text>
-                        <Text style={styles.infoValue}>1.0.0</Text>
-                    </View>
-
-                    <View style={styles.infoItem}>
-                        <Text style={styles.infoLabel}>Build</Text>
-                        <Text style={styles.infoValue}>1</Text>
-                    </View>
-                </View>
-            </ScrollView>
-        </SafeAreaView>
+  // Handle clear cache - memoized to prevent recreation on each render
+  const handleClearCache = useCallback(() => {
+    modal.showConfirm(
+      "Clear Cache",
+      "Are you sure you want to clear the app cache? This will remove all cached data.",
+      () => {
+        // Implement cache clearing logic here
+        modal.showSuccess("Success", "Cache cleared successfully");
+      },
+      undefined,
+      "Clear",
+      "Cancel"
     );
+  }, [modal]);
+
+  // Render theme mode option - memoized to prevent recreation on each render
+  const renderThemeModeOption = useCallback(
+    (mode: ThemeMode, label: string, icon: keyof typeof Ionicons.glyphMap) => {
+      const isSelected = themeMode === mode;
+
+      return (
+        <TouchableOpacity
+          style={[
+            styles.themeModeOption,
+            isSelected && styles.themeModeOptionSelected,
+          ]}
+          onPress={() => handleThemeModeChange(mode)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.themeModeIcon}>
+            <Ionicons
+              name={icon}
+              size={32}
+              color={
+                isSelected ? colors.interactive.primary : colors.text.secondary
+              }
+            />
+          </View>
+          <ThemedText
+            size="sm"
+            weight="medium"
+            variant={isSelected ? "primary" : "secondary"}
+            style={styles.themeModeLabel}
+          >
+            {label}
+          </ThemedText>
+          {isSelected && (
+            <View style={styles.selectedIndicator}>
+              <Ionicons
+                name="checkmark-circle"
+                size={20}
+                color={colors.interactive.primary}
+              />
+            </View>
+          )}
+        </TouchableOpacity>
+      );
+    },
+    [themeMode, styles, colors, handleThemeModeChange]
+  );
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
+      <ThemedView style={styles.container}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={styles.header}>
+            <ThemedText size="xxl" weight="bold">
+              Settings
+            </ThemedText>
+          </View>
+
+          {/* Theme Settings Section */}
+          <ThemedSectionHeader title="Theme Settings" />
+          <ThemedCard style={styles.card}>
+            <ThemedText size="md" weight="medium" style={styles.sectionTitle}>
+              Appearance
+            </ThemedText>
+            <ThemedText
+              variant="secondary"
+              size="sm"
+              style={styles.sectionDescription}
+            >
+              Choose your preferred theme mode
+            </ThemedText>
+
+            <View style={styles.themeModeContainer}>
+              {renderThemeModeOption("light", "Light", "sunny")}
+              {renderThemeModeOption("dark", "Dark", "moon")}
+              {renderThemeModeOption("system", "System", "phone-portrait")}
+            </View>
+          </ThemedCard>
+
+          {/* App Settings Section */}
+          <ThemedSectionHeader title="App Settings" />
+          <ThemedCard style={styles.card}>
+            <ThemedSettingRow
+              title="Always Connect VPN"
+              subtitle="Automatically connect on device boot"
+              rightContent={
+                <ThemedSwitch
+                  value={autoConnect}
+                  onValueChange={handleAutoConnectChange}
+                  disabled={isLoadingAutoConnect}
+                />
+              }
+            />
+            <ThemedDivider />
+            <ThemedSettingRow
+              title="Notifications"
+              subtitle="Show VPN connection notifications"
+              rightContent={
+                <ThemedSwitch
+                  value={notifications}
+                  onValueChange={setNotifications}
+                />
+              }
+            />
+          </ThemedCard>
+
+          {/* Debug Tools Section */}
+          <ThemedSectionHeader title="Debug Tools" />
+          <ThemedCard style={styles.card}>
+            <ThemedSettingRow
+              title="View Logs"
+              subtitle="View app and VPN logs"
+              icon={
+                <Ionicons
+                  name="document-text"
+                  size={24}
+                  color={colors.text.secondary}
+                />
+              }
+              showChevron
+              onPress={handleViewLogs}
+            />
+            <ThemedDivider />
+            <ThemedSettingRow
+              title="Clear Cache"
+              subtitle="Remove all cached data"
+              icon={
+                <Ionicons name="trash" size={24} color={colors.status.error} />
+              }
+              showChevron
+              onPress={handleClearCache}
+            />
+          </ThemedCard>
+
+          {/* App Info Section */}
+          <ThemedSectionHeader title="About" />
+          <ThemedCard style={styles.card}>
+            <ThemedSettingRow
+              title="App Version"
+              subtitle="1.0.0"
+              icon={
+                <Ionicons
+                  name="information-circle"
+                  size={24}
+                  color={colors.text.secondary}
+                />
+              }
+            />
+            <ThemedDivider />
+            <ThemedSettingRow
+              title="Platform"
+              subtitle={Platform.OS === "ios" ? "iOS" : "Android"}
+              icon={
+                <Ionicons
+                  name={Platform.OS === "ios" ? "logo-apple" : "logo-android"}
+                  size={24}
+                  color={colors.text.secondary}
+                />
+              }
+            />
+          </ThemedCard>
+
+          {/* Footer spacing */}
+          <View style={styles.footer} />
+        </ScrollView>
+      </ThemedView>
+      <CustomModal
+        visible={modal.visible}
+        config={modal.config}
+        onDismiss={modal.hideModal}
+      />
+    </SafeAreaView>
+  );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: Theme) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: theme.colors.background.primary,
+    },
     container: {
-        flex: 1,
-        backgroundColor: '#f5f5f5',
+      flex: 1,
+    },
+    scrollContent: {
+      paddingBottom: theme.spacing.xl,
     },
     header: {
-        padding: 16,
-        backgroundColor: '#fff',
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
+      paddingHorizontal: theme.spacing.md,
+      paddingTop: theme.spacing.lg,
+      paddingBottom: theme.spacing.md,
     },
-    title: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: '#333',
-    },
-    content: {
-        flex: 1,
-    },
-    section: {
-        marginTop: 24,
-        paddingHorizontal: 16,
+    card: {
+      marginHorizontal: theme.spacing.md,
+      marginBottom: theme.spacing.sm,
     },
     sectionTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#999',
-        marginBottom: 12,
-        textTransform: 'uppercase',
-        letterSpacing: 1,
+      marginBottom: theme.spacing.xs,
     },
-    settingItem: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        backgroundColor: '#fff',
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 8,
+    sectionDescription: {
+      marginBottom: theme.spacing.md,
     },
-    settingInfo: {
-        flex: 1,
-        marginRight: 16,
+    themeModeContainer: {
+      flexDirection: "row",
+      gap: theme.spacing.md,
+      marginBottom: theme.spacing.md,
     },
-    settingLabel: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#333',
-        marginBottom: 4,
+    themeModeOption: {
+      flex: 1,
+      alignItems: "center",
+      paddingVertical: theme.spacing.md,
+      paddingHorizontal: theme.spacing.sm,
+      borderRadius: theme.borderRadius.lg,
+      backgroundColor: theme.colors.background.tertiary,
     },
-    settingDescription: {
-        fontSize: 14,
-        color: '#666',
+    themeModeOptionSelected: {
+      backgroundColor: theme.colors.background.elevated,
+      // Simplified shadow for better performance on mobile
+      shadowColor: theme.colors.interactive.primary,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.15,
+      shadowRadius: 4,
+      elevation: 2,
     },
-    dangerButton: {
-        backgroundColor: '#fff',
-        padding: 16,
-        borderRadius: 12,
-        borderWidth: 2,
-        borderColor: '#FF3B30',
-        alignItems: 'center',
+    themeModeIcon: {
+      marginBottom: theme.spacing.sm,
     },
-    dangerButtonText: {
-        color: '#FF3B30',
-        fontSize: 16,
-        fontWeight: '600',
+    themeModeLabel: {
+      textAlign: "center",
     },
-    infoItem: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        backgroundColor: '#fff',
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 8,
+    selectedIndicator: {
+      position: "absolute",
+      top: theme.spacing.xs,
+      right: theme.spacing.xs,
     },
-    infoLabel: {
-        fontSize: 16,
-        color: '#666',
+    footer: {
+      height: theme.spacing.xl,
     },
-    infoValue: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#333',
-    },
-});
+  });
+
+export default SettingsScreen;
