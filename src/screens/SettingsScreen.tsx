@@ -34,6 +34,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import type { Theme, ThemeMode } from "../types/theme";
 import { VPNModule } from "../native/VPNModule";
+import appJson from "../../app.json";
 
 interface SettingsScreenProps {
   navigation?: any;
@@ -259,7 +260,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <ThemedCard style={styles.card}>
             <ThemedSettingRow
               title="App Version"
-              subtitle="1.0.0"
+              subtitle={appJson.expo.version}
               icon={
                 <Ionicons
                   name="information-circle"
