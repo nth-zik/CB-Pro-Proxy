@@ -34,7 +34,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import type { Theme, ThemeMode } from "../types/theme";
 import { VPNModule } from "../native/VPNModule";
-import appJson from "../../app.json";
+import Constants from "expo-constants";
 
 interface SettingsScreenProps {
   navigation?: any;
@@ -51,22 +51,32 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [autoConnect, setAutoConnect] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [isLoadingAutoConnect, setIsLoadingAutoConnect] = useState(true);
+  const [appVersion, setAppVersion] = useState<string>("Loading...");
 
-  // Load auto-connect preference on mount
+  // Load auto-connect preference and app version on mount
   useEffect(() => {
-    const loadAutoConnectPreference = async () => {
+    const loadSettings = async () => {
       try {
+        // Load auto-connect preference
         const enabled = await VPNModule.getAutoConnectEnabled();
         setAutoConnect(enabled);
+        
+        // Get app version from native build config
+        const version = Constants.expoConfig?.version ||
+                       Constants.manifest?.version ||
+                       "1.0.0";
+        setAppVersion(version);
+        console.log("📱 App version loaded:", version);
       } catch (error) {
-        console.error("Failed to load auto-connect preference:", error);
-        modal.showError("Error", "Failed to load auto-connect setting");
+        console.error("Failed to load settings:", error);
+        modal.showError("Error", "Failed to load app settings");
+        setAppVersion("Unknown");
       } finally {
         setIsLoadingAutoConnect(false);
       }
     };
 
-    loadAutoConnectPreference();
+    loadSettings();
   }, [modal]);
 
   // Handle auto-connect toggle
@@ -260,7 +270,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           <ThemedCard style={styles.card}>
             <ThemedSettingRow
               title="App Version"
-              subtitle={appJson.expo.version}
+              subtitle={appVersion}
               icon={
                 <Ionicons
                   name="information-circle"

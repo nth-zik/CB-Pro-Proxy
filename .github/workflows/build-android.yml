@@ -45,8 +45,23 @@ jobs:
           const appJson = JSON.parse(fs.readFileSync('app.json', 'utf8'));
           appJson.expo.version = '${{ steps.version.outputs.version }}';
           fs.writeFileSync('app.json', JSON.stringify(appJson, null, 2) + '\n');
-          console.log('Updated version to: ${{ steps.version.outputs.version }}');
+          console.log('✅ Updated app.json version to: ${{ steps.version.outputs.version }}');
           "
+          echo "📄 Verifying app.json update:"
+          cat app.json | grep -A 1 '"version"'
+
+      - name: Update build.gradle version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          VERSION_CODE=$(echo "$VERSION" | sed 's/\.//g')
+          
+          echo "📝 Updating build.gradle with version: $VERSION (versionCode: $VERSION_CODE)"
+          
+          sed -i "s/versionCode [0-9]*/versionCode $VERSION_CODE/" android/app/build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"$VERSION\"/" android/app/build.gradle
+          
+          echo "✅ Updated build.gradle:"
+          grep -A 2 "versionCode\|versionName" android/app/build.gradle
 
       - name: Prebuild for Android
         run: npx expo prebuild --platform android --no-install
