@@ -41,8 +41,17 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
     loadProfiles();
   }, []);
 
+  // Reload profiles when screen comes into focus (e.g., after ADB adds a profile)
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("focus", () => {
+      loadProfiles(true); // Force refresh to get latest from native
+    });
+
+    return unsubscribe;
+  }, [navigation, loadProfiles]);
+
   const handleRefresh = () => {
-    loadProfiles();
+    loadProfiles(true); // Force refresh to get latest from native
   };
 
   const handleAddProfile = () => {

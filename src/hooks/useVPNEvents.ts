@@ -69,7 +69,8 @@ export const useVPNEvents = () => {
           profileName: payload?.name,
           isUpdate: payload?.isUpdate,
         });
-        await loadProfiles();
+        // Force reload to ensure native profiles are synced to React Native
+        await loadProfiles(true);
 
         setProfileNotification({
           id: payload?.id || "",
@@ -140,6 +141,8 @@ export const useVPNEvents = () => {
         });
         const profileId = payload?.profileId;
         if (profileId) {
+          // Force reload to ensure profile exists before selecting
+          await loadProfiles(true);
           // Update the active profile in store
           await selectProfile(profileId);
           logDebug("Active profile updated in store", undefined, { profileId });
@@ -209,7 +212,6 @@ export const useVPNEvents = () => {
     setError,
     loadProfiles,
     setProfileNotification,
-    profiles,
     selectProfile,
     logInfo,
     logError,
