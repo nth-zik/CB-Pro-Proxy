@@ -7,6 +7,12 @@ on:
       - "v*"
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional version to use (e.g. 1.2.3). If provided, this overrides tag-based version.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -19,15 +25,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Extract version from tag
+      - name: Determine version
         id: version
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          # Prefer manual input when provided
+          if [[ -n "${{ github.event.inputs.version || '' }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Using manual input version: $VERSION"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             VERSION=${GITHUB_REF#refs/tags/v}
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Using tag-based version: $VERSION"
           else
-            echo "version=1.0.0" >> $GITHUB_OUTPUT
+            VERSION=1.0.0
+            echo "Using default version: $VERSION"
           fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
