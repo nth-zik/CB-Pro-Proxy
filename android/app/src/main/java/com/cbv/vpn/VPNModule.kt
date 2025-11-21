@@ -367,6 +367,8 @@ class VPNModule(reactContext: ReactApplicationContext) :
             val prefs =
                     reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("manually_disconnected", false).apply()
+            // Mark automation session as false when started from UI/React
+            prefs.edit().putBoolean("automation_session_active", false).apply()
             Log.d(TAG, "💾 Cleared manually disconnected flag")
 
             startVPNService(profile)
@@ -456,6 +458,7 @@ class VPNModule(reactContext: ReactApplicationContext) :
             val prefs =
                     reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("manually_disconnected", false).apply()
+            prefs.edit().putBoolean("automation_session_active", false).apply()
             Log.d(TAG, "💾 Cleared manually disconnected flag")
 
             startVPNService(profile)
@@ -478,18 +481,29 @@ class VPNModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod
-    fun stopVPN(promise: Promise) {
+    fun stopVPN(force: Boolean, promise: Promise) {
         try {
             Log.d(TAG, "🛑 Stopping VPN...")
 
-            // Mark as manually disconnected to prevent auto-reconnect
             val prefs =
                     reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
-            prefs.edit().putBoolean("manually_disconnected", true).apply()
-            Log.d(TAG, "💾 Marked VPN as manually disconnected")
+            // Only mark manual disconnect when explicitly forced (user/UI or STOP intent)
+            if (force) {
+                prefs.edit().putBoolean("manually_disconnected", true).apply()
+                prefs.edit().putBoolean("automation_session_active", false).apply()
+                Log.d(TAG, "💾 Marked VPN as manually disconnected (force=$force)")
+            } else {
+                Log.d(
+                        TAG,
+                        "🛡️ Stop request ignored (force=false). Automation session protected."
+                )
+                promise.resolve(null)
+                return
+            }
 
             val intent = Intent(reactApplicationContext, VPNConnectionService::class.java)
             intent.putExtra("action", "stop")
+            intent.putExtra("force", force)
             reactApplicationContext.startService(intent)
 
             isConnected = false

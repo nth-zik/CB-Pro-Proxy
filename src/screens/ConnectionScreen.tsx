@@ -76,7 +76,8 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
     };
 
     requestNotificationPermission();
-    loadProfiles();
+    // Force refresh to sync profiles/active selection from native (ADB flows)
+    loadProfiles(true);
 
     console.log("🔍 Testing VPNModule...");
     VPNModule.getStatus()
@@ -442,7 +443,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
   const handleDisconnect = async () => {
     try {
       setIsConnectingLocal(false);
-      await VPNModule.stopVPN();
+      await VPNModule.stopVPN(true);
     } catch (error: any) {
       console.error("Error stopping VPN:", error);
     }

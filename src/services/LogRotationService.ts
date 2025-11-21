@@ -32,6 +32,7 @@ const STORAGE_LIMITS = {
   MAX_PARTITION_SIZE: 5 * 1024 * 1024, // 5MB per partition
   MAX_TOTAL_SIZE: 50 * 1024 * 1024, // 50MB total
   RETENTION_DAYS: 30,
+  SQLITE_ROW_SOFT_LIMIT: 900 * 1024, // ~900KB to stay under CursorWindow row limit
 } as const;
 
 /**
@@ -183,15 +184,28 @@ class LogRotationService {
       }
 
       // Merge and sort by timestamp
-      const allLogs = [...existingLogs, ...newLogs].sort(
+      let allLogs = [...existingLogs, ...newLogs].sort(
         (a, b) => a.timestamp - b.timestamp
       );
 
+      // Trim if payload is too large for SQLite CursorWindow
+      let size = this.estimateSize(allLogs);
+      if (size > STORAGE_LIMITS.SQLITE_ROW_SOFT_LIMIT) {
+        const originalCount = allLogs.length;
+        // Drop oldest logs until under soft limit
+        while (allLogs.length > 0 && size > STORAGE_LIMITS.SQLITE_ROW_SOFT_LIMIT) {
+          allLogs.shift();
+          size = this.estimateSize(allLogs);
+        }
+        console.warn(
+          `[LogRotationService] Trimmed ${originalCount - allLogs.length} logs from partition ${partitionId} to fit row limit`
+        );
+      }
+
       // Calculate partition metadata
-      const size = this.estimateSize(allLogs);
       const timestamps = allLogs.map((l) => l.timestamp);
-      const startTime = Math.min(...timestamps);
-      const endTime = Math.max(...timestamps);
+      const startTime = timestamps.length ? Math.min(...timestamps) : Date.now();
+      const endTime = timestamps.length ? Math.max(...timestamps) : Date.now();
 
       // Save partition
       await AsyncStorage.setItem(partitionKey, JSON.stringify(allLogs));

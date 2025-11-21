@@ -40,7 +40,7 @@ interface VPNStore {
 
   // Actions - VPN Control
   setVPNStatus: (status: VPNStatus | VPNStatusInfo) => void;
-  setError: (error: string | null) => void;
+  setError: (error: unknown) => void;
   clearError: () => void;
   setProfileNotification: (notification: ProfileNotification | null) => void;
   clearProfileNotification: () => void;
@@ -50,6 +50,26 @@ interface VPNStore {
 }
 
 const SELECTED_PROFILE_KEY = "@cbv_vpn_selected_profile";
+
+const normalizeErrorMessage = (error: unknown): string | null => {
+  if (!error) return null;
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message || error.toString();
+
+  if (typeof error === "object") {
+    // Attempt to read common fields first
+    const possible =
+      (error as any).message || (error as any).error || (error as any).reason;
+    if (typeof possible === "string") return possible;
+    try {
+      return JSON.stringify(error);
+    } catch (_jsonErr) {
+      return "Unknown error";
+    }
+  }
+
+  return "Unknown error";
+};
 
 export const useVPNStore = create<VPNStore>((set, get) => ({
   // Initial State
@@ -358,20 +378,23 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
     }
   },
 
-  setError: (error: string | null) => {
-    if (error) {
-      logger.error("VPN error occurred", "vpn", new Error(error));
+  setError: (error: unknown) => {
+    const message = normalizeErrorMessage(error);
+
+    if (message) {
+      logger.error("VPN error occurred", "vpn", new Error(message));
 
       // Simple log for users
       const profileName =
         get().profiles.find((p) => p.id === get().activeProfileId)?.name ||
         "Unknown";
-      logger.error(`❌ Connection error: ${profileName} - ${error}`, "vpn");
+      logger.error(`❌ Connection error: ${profileName} - ${message}`, "vpn");
     }
-    set({ error });
+
+    set({ error: message });
 
     // Nếu có error, set status về error
-    if (error) {
+    if (message) {
       set({
         vpnStatus: "error",
         isConnected: false,

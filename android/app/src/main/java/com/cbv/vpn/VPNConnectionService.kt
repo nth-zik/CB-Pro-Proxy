@@ -146,6 +146,20 @@ class VPNConnectionService : VpnService() {
             val action = intent.getStringExtra("action")
 
             if (action == COMMAND_STOP) {
+                val force = intent.getBooleanExtra("force", false)
+                val prefs = getSharedPreferences("vpn_prefs", MODE_PRIVATE)
+                val automationActive = prefs.getBoolean("automation_session_active", false)
+
+                if (automationActive && !force) {
+                    Log.w(
+                            TAG,
+                            "⚠️ Stop request ignored because automation session is active (force=$force)"
+                    )
+                    return START_NOT_STICKY
+                }
+
+                // Clear automation flag when a forced stop is allowed
+                prefs.edit().putBoolean("automation_session_active", false).apply()
                 stopVPN()
                 return START_NOT_STICKY
             }

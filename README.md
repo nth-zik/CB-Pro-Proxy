@@ -127,6 +127,7 @@ cbv-vpn-app/
 Android exposes a broadcast receiver (`VPNIntentReceiver.kt`) with explicit intent actions:
 
 - `com.cbv.vpn.ADD_PROFILE`
+- `com.cbv.vpn.ADD_AND_START`
 - `com.cbv.vpn.START_VPN_BY_NAME`
 - `com.cbv.vpn.START_VPN_BY_ID`
 - `com.cbv.vpn.STOP_VPN`

@@ -30,7 +30,7 @@ type NativeVPNModuleShape = {
     dns1?: string,
     dns2?: string
   ): Promise<void>;
-  stopVPN(): Promise<void>;
+  stopVPN(force?: boolean): Promise<void>;
   getStatus(): Promise<any>;
   refreshStatus(): void;
   setAutoConnectEnabled(enabled: boolean): Promise<void>;
@@ -285,10 +285,10 @@ export const VPNModule = {
       throw error;
     }
   },
-  stopVPN: async () => {
+  stopVPN: async (force = false) => {
     try {
       logger.info("Stopping VPN connection", "vpn");
-      await NativeVPNModule.stopVPN();
+      await NativeVPNModule.stopVPN(force);
       logger.info("VPN connection stop requested", "vpn");
     } catch (error) {
       logger.error("Failed to stop VPN connection", "vpn", error as Error);

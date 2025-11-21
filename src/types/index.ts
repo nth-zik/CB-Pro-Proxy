@@ -53,7 +53,7 @@ export interface VPNModuleInterface {
 
   // VPN Control
   startVPN(profileId: string): Promise<void>;
-  stopVPN(): Promise<void>;
+  stopVPN(force?: boolean): Promise<void>;
   getStatus(): Promise<VPNStatusInfo>;
 
   // Events

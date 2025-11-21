@@ -21,6 +21,7 @@ class VPNIntentReceiver : BroadcastReceiver() {
 
         // Intent actions
         const val ACTION_ADD_PROFILE = "com.cbv.vpn.ADD_PROFILE"
+        const val ACTION_ADD_AND_START = "com.cbv.vpn.ADD_AND_START"
         const val ACTION_START_VPN_BY_NAME = "com.cbv.vpn.START_VPN_BY_NAME"
         const val ACTION_START_VPN_BY_ID = "com.cbv.vpn.START_VPN_BY_ID"
         const val ACTION_STOP_VPN = "com.cbv.vpn.STOP_VPN"
@@ -45,6 +46,119 @@ class VPNIntentReceiver : BroadcastReceiver() {
 
         // Intent extras for START_VPN
         const val EXTRA_PROFILE_ID = "profile_id"
+
+        /**
+         * Starts the VPN connection service with the given profile.
+         * Shared between the broadcast receiver and VPNPermissionActivity so
+         * ADB-triggered flows can complete even when the app isn't already running.
+         */
+        @JvmStatic
+        fun startVpnService(context: Context, profile: JSONObject) {
+            val prefs = context.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
+            val profileId = profile.getString("id")
+            val proxyHost = profile.getString("host")
+
+            // Stop existing VPN connection first to avoid stale tunnels
+            Log.d(TAG, "🛑 Stopping any existing VPN connection...")
+            val stopIntent = Intent(context, VPNConnectionService::class.java)
+            stopIntent.putExtra("action", "stop")
+            context.startService(stopIntent)
+
+            // Wait a moment for the stop to complete
+            Thread.sleep(500)
+
+            // Check notification permission on Android 13+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val notifGranted =
+                        androidx.core.content.ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (!notifGranted) {
+                    Log.w(
+                            TAG,
+                            "⚠️ POST_NOTIFICATIONS not granted, bringing app to foreground to request"
+                    )
+                    try {
+                        val reqIntent = Intent("com.cbv.vpn.REQUEST_NOTIF_PERMISSION")
+                        LocalBroadcastManager.getInstance(context).sendBroadcast(reqIntent)
+                    } catch (_: Exception) {}
+                    val launchIntent =
+                            context.packageManager.getLaunchIntentForPackage(context.packageName)
+                    launchIntent?.apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    }
+                    if (launchIntent != null) {
+                        context.startActivity(launchIntent)
+                    }
+                    return
+                }
+            }
+
+            // Save this profile as the selected/active profile
+            prefs.edit().putString("selected_profile_id", profileId).apply()
+            Log.d(TAG, "💾 Saved active profile: $profileId")
+
+            // Broadcast active profile change to React Native
+            val activeProfileIntent =
+                    Intent("com.cbv.vpn.ACTIVE_PROFILE_CHANGED").apply {
+                        putExtra("profile_id", profileId)
+                        putExtra("profile_name", profile.getString("name"))
+                    }
+            LocalBroadcastManager.getInstance(context).sendBroadcast(activeProfileIntent)
+            Log.d(TAG, "📡 Broadcasted active profile change")
+
+            Log.d(TAG, "🌐 Resolving proxy hostname: $proxyHost")
+
+            var proxyIP = proxyHost
+            try {
+                val addr = java.net.InetAddress.getByName(proxyHost)
+                proxyIP = addr.hostAddress ?: proxyHost
+                Log.d(TAG, "✅ Resolved to IP: $proxyIP")
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Could not resolve hostname, using as-is: ${e.message}")
+            }
+
+            val serviceIntent = Intent(context, VPNConnectionService::class.java)
+            serviceIntent.putExtra("server", proxyHost)
+            serviceIntent.putExtra("serverIP", proxyIP)
+            serviceIntent.putExtra("port", profile.getInt("port"))
+            serviceIntent.putExtra("type", profile.optString("type", "socks5"))
+            serviceIntent.putExtra("username", profile.optString("username", ""))
+            serviceIntent.putExtra("password", profile.optString("password", ""))
+            serviceIntent.putExtra("dns1", profile.optString("dns1", "1.1.1.1"))
+            serviceIntent.putExtra("dns2", profile.optString("dns2", "8.8.8.8"))
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                val shouldBringToFront =
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                                e.javaClass.simpleName.contains(
+                                        "ForegroundServiceStartNotAllowedException"
+                                )
+                if (shouldBringToFront) {
+                    val launchIntent =
+                            context.packageManager.getLaunchIntentForPackage(context.packageName)
+                    launchIntent?.apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    }
+                    if (launchIntent != null) {
+                        context.startActivity(launchIntent)
+                    }
+                } else {
+                    throw e
+                }
+            }
+
+            Log.d(TAG, "✅ VPN service started successfully")
+        }
     }
 
     override fun onReceive(context: Context?, intent: Intent?) {
@@ -59,6 +173,7 @@ class VPNIntentReceiver : BroadcastReceiver() {
 
         when (intent.action) {
             ACTION_ADD_PROFILE -> handleAddProfile(context, intent)
+            ACTION_ADD_AND_START -> handleAddAndStart(context, intent)
             ACTION_START_VPN_BY_NAME -> handleStartVPNByName(context, intent)
             ACTION_START_VPN_BY_ID -> handleStartVPNById(context, intent)
             ACTION_STOP_VPN -> handleStopVPN(context)
@@ -375,6 +490,45 @@ class VPNIntentReceiver : BroadcastReceiver() {
         }
     }
 
+    private fun handleAddAndStart(context: Context, intent: Intent) {
+        try {
+            // First add or update the profile
+            handleAddProfile(context, intent)
+
+            val name = intent.getStringExtra(EXTRA_PROFILE_NAME)
+            if (name.isNullOrEmpty()) {
+                Log.e(TAG, "❌ Missing profile_name parameter for ADD_AND_START")
+                return
+            }
+
+            Log.d(TAG, "🚀 ADD_AND_START requested for: $name")
+
+            // Reload profiles to get the latest data
+            val prefs = context.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
+            val profilesStr = prefs.getString("profiles", "[]")
+            val profiles = JSONArray(profilesStr ?: "[]")
+
+            var targetProfile: JSONObject? = null
+            for (i in 0 until profiles.length()) {
+                val profile = profiles.getJSONObject(i)
+                if (profile.getString("name") == name) {
+                    targetProfile = profile
+                    Log.d(TAG, "✅ Found profile for ADD_AND_START: ${profile.getString("name")}")
+                    break
+                }
+            }
+
+            if (targetProfile == null) {
+                Log.e(TAG, "❌ Profile not found after add: $name")
+                return
+            }
+
+            startVPNWithProfile(context, targetProfile)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error handling ADD_AND_START: ${e.message}", e)
+        }
+    }
+
     private fun handleStartVPNByName(context: Context, intent: Intent) {
         try {
             val profileName = intent.getStringExtra(EXTRA_PROFILE_NAME)
@@ -458,10 +612,12 @@ class VPNIntentReceiver : BroadcastReceiver() {
             // Mark as manually disconnected to prevent auto-reconnect
             val prefs = context.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("manually_disconnected", true).apply()
+            prefs.edit().putBoolean("automation_session_active", false).apply()
             Log.d(TAG, "💾 Marked VPN as manually disconnected")
 
             val serviceIntent = Intent(context, VPNConnectionService::class.java)
             serviceIntent.putExtra("action", "stop")
+            serviceIntent.putExtra("force", true)
             context.startService(serviceIntent)
             Log.d(TAG, "✅ Stop VPN command sent")
         } catch (e: Exception) {
@@ -488,6 +644,8 @@ class VPNIntentReceiver : BroadcastReceiver() {
             // Clear manually disconnected flag when starting VPN
             val prefs = context.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
             prefs.edit().putBoolean("manually_disconnected", false).apply()
+            // Mark that this session was started via automation (ADB)
+            prefs.edit().putBoolean("automation_session_active", true).apply()
             Log.d(TAG, "💾 Cleared manually disconnected flag")
 
             // Save this profile as the last connected profile
@@ -509,123 +667,41 @@ class VPNIntentReceiver : BroadcastReceiver() {
                         }
                 LocalBroadcastManager.getInstance(context).sendBroadcast(broadcastIntent)
 
-                // Open the app
-                val launchIntent =
-                        context.packageManager.getLaunchIntentForPackage(context.packageName)
-                launchIntent?.apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                // Open lightweight permission activity so ADB calls can complete
+                try {
+                    val permissionIntent = Intent(context, VPNPermissionActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        putExtra(
+                                VPNPermissionActivity.EXTRA_PROFILE_JSON,
+                                profile.toString()
+                        )
+                    }
+                    context.startActivity(permissionIntent)
+                    Log.d(
+                            TAG,
+                            "📱 Launched VPNPermissionActivity to request VPN permission automatically"
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Failed to launch VPNPermissionActivity: ${e.message}", e)
+
+                    // Fallback: Open the app root so user can approve manually
+                    val launchIntent =
+                            context.packageManager.getLaunchIntentForPackage(context.packageName)
+                    launchIntent?.apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    }
+                    if (launchIntent != null) {
+                        context.startActivity(launchIntent)
+                    }
                 }
-                context.startActivity(launchIntent)
 
                 Log.d(TAG, "📱 App opened, waiting for user to grant VPN permission")
                 return
             }
 
-            // Stop existing VPN connection first
-            Log.d(TAG, "🛑 Stopping any existing VPN connection...")
-            val stopIntent = Intent(context, VPNConnectionService::class.java)
-            stopIntent.putExtra("action", "stop")
-            context.startService(stopIntent)
-
-            // Wait a moment for the stop to complete
-            Thread.sleep(500)
-
-            // Check notification permission on Android 13+
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val notifGranted =
-                        androidx.core.content.ContextCompat.checkSelfPermission(
-                                context,
-                                android.Manifest.permission.POST_NOTIFICATIONS
-                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                if (!notifGranted) {
-                    Log.w(
-                            TAG,
-                            "⚠️ POST_NOTIFICATIONS not granted, bringing app to foreground to request"
-                    )
-                    try {
-                        val reqIntent = Intent("com.cbv.vpn.REQUEST_NOTIF_PERMISSION")
-                        LocalBroadcastManager.getInstance(context).sendBroadcast(reqIntent)
-                    } catch (_: Exception) {}
-                    val launchIntent =
-                            context.packageManager.getLaunchIntentForPackage(context.packageName)
-                    launchIntent?.apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    }
-                    if (launchIntent != null) {
-                        context.startActivity(launchIntent)
-                    }
-                    return
-                }
-            }
-
             // Permission already granted, start VPN service directly
-            val profileId = profile.getString("id")
-            val proxyHost = profile.getString("host")
-
-            // Save this profile as the selected/active profile
-            prefs.edit().putString("selected_profile_id", profileId).apply()
-            Log.d(TAG, "💾 Saved active profile: $profileId")
-
-            // Broadcast active profile change to React Native
-            val activeProfileIntent =
-                    Intent("com.cbv.vpn.ACTIVE_PROFILE_CHANGED").apply {
-                        putExtra("profile_id", profileId)
-                        putExtra("profile_name", profile.getString("name"))
-                    }
-            LocalBroadcastManager.getInstance(context).sendBroadcast(activeProfileIntent)
-            Log.d(TAG, "📡 Broadcasted active profile change")
-
-            Log.d(TAG, "🌐 Resolving proxy hostname: $proxyHost")
-
-            var proxyIP = proxyHost
-            try {
-                val addr = java.net.InetAddress.getByName(proxyHost)
-                proxyIP = addr.hostAddress ?: proxyHost
-                Log.d(TAG, "✅ Resolved to IP: $proxyIP")
-            } catch (e: Exception) {
-                Log.w(TAG, "⚠️ Could not resolve hostname, using as-is: ${e.message}")
-            }
-
-            val serviceIntent = Intent(context, VPNConnectionService::class.java)
-            serviceIntent.putExtra("server", proxyHost)
-            serviceIntent.putExtra("serverIP", proxyIP)
-            serviceIntent.putExtra("port", profile.getInt("port"))
-            serviceIntent.putExtra("type", profile.optString("type", "socks5"))
-            serviceIntent.putExtra("username", profile.optString("username", ""))
-            serviceIntent.putExtra("password", profile.optString("password", ""))
-            serviceIntent.putExtra("dns1", profile.optString("dns1", "1.1.1.1"))
-            serviceIntent.putExtra("dns2", profile.optString("dns2", "8.8.8.8"))
-
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent)
-                } else {
-                    context.startService(serviceIntent)
-                }
-            } catch (e: Exception) {
-                val shouldBringToFront =
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                                e.javaClass.simpleName.contains(
-                                        "ForegroundServiceStartNotAllowedException"
-                                )
-                if (shouldBringToFront) {
-                    val launchIntent =
-                            context.packageManager.getLaunchIntentForPackage(context.packageName)
-                    launchIntent?.apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    }
-                    if (launchIntent != null) {
-                        context.startActivity(launchIntent)
-                    }
-                } else {
-                    throw e
-                }
-            }
-
-            Log.d(TAG, "✅ VPN service started successfully")
+            startVpnService(context, profile)
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error starting VPN service: ${e.message}", e)
         }

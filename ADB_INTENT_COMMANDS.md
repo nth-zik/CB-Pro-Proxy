@@ -5,6 +5,7 @@ Guide for controlling the VPN app via ADB intents (automation, scripts, remote c
 ## Table of Contents
 
 - [Add VPN Profile](#add-vpn-profile)
+- [Add & Start VPN Profile](#add--start-vpn-profile)
 - [Start VPN by Profile Name](#start-vpn-by-profile-name)
 - [Start VPN by Profile ID](#start-vpn-by-profile-id)
 - [Stop VPN](#stop-vpn)
@@ -82,6 +83,45 @@ adb shell am broadcast \
   --es profile_type "http" \
   --es profile_dns1 "8.8.8.8" \
   --es profile_dns2 "8.8.4.4"
+```
+
+---
+
+## Add & Start VPN Profile
+
+Add (or update if the name already exists) and immediately start the profile.
+
+### Syntax
+
+```bash
+adb shell am broadcast \
+  -a com.cbv.vpn.ADD_AND_START \
+  --es profile_name "PROFILE_NAME" \
+  --es profile_host "PROXY_HOST" \
+  --ei profile_port PORT \
+  --es profile_type "socks5|http" \
+  [--es profile_username "USERNAME"] \
+  [--es profile_password "PASSWORD"] \
+  [--es profile_dns1 "DNS1"] \
+  [--es profile_dns2 "DNS2"]
+```
+
+### Behavior
+
+- If a profile with the same name exists, it is updated in-place.
+- If VPN/notification permission has never been granted, a one-time dialog will appear; grant it to continue.
+
+### Example
+
+```bash
+adb shell am broadcast \
+  -a com.cbv.vpn.ADD_AND_START \
+  --es profile_name "Farm-01" \
+  --es profile_host "10.0.0.50" \
+  --ei profile_port 1080 \
+  --es profile_type "socks5" \
+  --es profile_username "user" \
+  --es profile_password "pass"
 ```
 
 ---

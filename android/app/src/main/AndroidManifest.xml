@@ -45,10 +45,14 @@
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
     </activity>
+    <activity android:name=".VPNPermissionActivity"
+      android:exported="false" android:theme="@style/AppTheme"
+      android:launchMode="singleTop" />
     <receiver android:name=".VPNIntentReceiver" android:exported="true"
       android:directBootAware="true">
       <intent-filter>
         <action android:name="com.cbv.vpn.ADD_PROFILE" />
+        <action android:name="com.cbv.vpn.ADD_AND_START" />
         <action android:name="com.cbv.vpn.START_VPN_BY_NAME" />
         <action android:name="com.cbv.vpn.START_VPN_BY_ID" />
         <action android:name="com.cbv.vpn.STOP_VPN" />
