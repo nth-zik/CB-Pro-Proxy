@@ -28,28 +28,20 @@ export const LogsScreen: React.FC = () => {
   const { logs, clearLogs } = useLoggingStore();
   const modal = useCustomModal();
 
-  // Sort logs by timestamp (newest first) and ensure unique keys
+  // Sort logs by timestamp (newest first) and remove duplicates
   const sortedLogs = React.useMemo(() => {
-    const sorted = [...logs].sort((a, b) => b.timestamp - a.timestamp);
-
-    // DEBUG: Check for duplicate IDs in the sorted logs
-    const idSet = new Set<string>();
-    const duplicates: string[] = [];
-    sorted.forEach((log) => {
-      if (idSet.has(log.id)) {
-        duplicates.push(log.id);
+    // Remove duplicates by ID
+    const uniqueLogsMap = new Map<string, typeof logs[0]>();
+    logs.forEach((log) => {
+      if (!uniqueLogsMap.has(log.id)) {
+        uniqueLogsMap.set(log.id, log);
       }
-      idSet.add(log.id);
     });
-
-    if (duplicates.length > 0) {
-      console.error(
-        `[LogsScreen] Found ${duplicates.length} duplicate IDs:`,
-        duplicates
-      );
-    }
-
-    return sorted;
+    
+    const uniqueLogs = Array.from(uniqueLogsMap.values());
+    
+    // Sort by timestamp (newest first)
+    return uniqueLogs.sort((a, b) => b.timestamp - a.timestamp);
   }, [logs]);
 
   // Handle clear logs
@@ -92,18 +84,19 @@ export const LogsScreen: React.FC = () => {
         ) : (
           <FlatList
             data={sortedLogs}
-            keyExtractor={(item, index) => {
-              // Use ID as primary key, but fallback to index if ID is duplicated
-              // This prevents React key warnings while we investigate the root cause
-              return `${item.id}-${index}`;
-            }}
+            keyExtractor={(item) => item.id}
             renderItem={({ item }) => <LogEntry entry={item} />}
             contentContainerStyle={styles.listContent}
             removeClippedSubviews={true}
-            maxToRenderPerBatch={10}
+            maxToRenderPerBatch={20}
             updateCellsBatchingPeriod={50}
-            initialNumToRender={10}
-            windowSize={5}
+            initialNumToRender={20}
+            windowSize={10}
+            getItemLayout={(data, index) => ({
+              length: 80, // Approximate height of each log entry
+              offset: 80 * index,
+              index,
+            })}
           />
         )}
       </View>

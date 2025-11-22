@@ -29,9 +29,9 @@ const STORAGE_KEYS = {
  * Storage limits
  */
 const STORAGE_LIMITS = {
-  MAX_PARTITION_SIZE: 5 * 1024 * 1024, // 5MB per partition
-  MAX_TOTAL_SIZE: 50 * 1024 * 1024, // 50MB total
-  RETENTION_DAYS: 30,
+  MAX_PARTITION_SIZE: 2 * 1024 * 1024, // 2MB per partition (reduced from 5MB)
+  MAX_TOTAL_SIZE: 2 * 1024 * 1024, // 2MB total (reduced from 50MB)
+  RETENTION_DAYS: 7, // Reduced from 30 days to 7 days
   SQLITE_ROW_SOFT_LIMIT: 900 * 1024, // ~900KB to stay under CursorWindow row limit
 } as const;
 
@@ -183,22 +183,37 @@ class LogRotationService {
         existingLogs = JSON.parse(existingData);
       }
 
+      // Merge with duplicate detection
+      const existingIds = new Set(existingLogs.map((log) => log.id));
+      const uniqueNewLogs = newLogs.filter((log) => !existingIds.has(log.id));
+      
+      if (uniqueNewLogs.length < newLogs.length) {
+        console.warn(
+          `[LogRotationService] Filtered out ${newLogs.length - uniqueNewLogs.length} duplicate logs in partition ${partitionId}`
+        );
+      }
+
       // Merge and sort by timestamp
-      let allLogs = [...existingLogs, ...newLogs].sort(
+      let allLogs = [...existingLogs, ...uniqueNewLogs].sort(
         (a, b) => a.timestamp - b.timestamp
       );
 
-      // Trim if payload is too large for SQLite CursorWindow
+      // Trim if payload is too large (respect 2MB limit)
       let size = this.estimateSize(allLogs);
-      if (size > STORAGE_LIMITS.SQLITE_ROW_SOFT_LIMIT) {
+      const sizeLimit = Math.min(
+        STORAGE_LIMITS.SQLITE_ROW_SOFT_LIMIT,
+        STORAGE_LIMITS.MAX_PARTITION_SIZE
+      );
+      
+      if (size > sizeLimit) {
         const originalCount = allLogs.length;
-        // Drop oldest logs until under soft limit
-        while (allLogs.length > 0 && size > STORAGE_LIMITS.SQLITE_ROW_SOFT_LIMIT) {
+        // Drop oldest logs until under size limit
+        while (allLogs.length > 0 && size > sizeLimit) {
           allLogs.shift();
           size = this.estimateSize(allLogs);
         }
         console.warn(
-          `[LogRotationService] Trimmed ${originalCount - allLogs.length} logs from partition ${partitionId} to fit row limit`
+          `[LogRotationService] Trimmed ${originalCount - allLogs.length} logs from partition ${partitionId} to fit ${sizeLimit} bytes limit (was ${this.estimateSize([...Array(originalCount)])} bytes)`
         );
       }
 
@@ -244,8 +259,9 @@ class LogRotationService {
     try {
       const index = await this.loadPartitionIndex();
       const allLogs: LogEntry[] = [];
+      const seenIds = new Set<string>();
 
-      // Load logs from relevant partitions
+      // Load logs from relevant partitions with duplicate detection
       for (const partition of index.partitions) {
         // Skip partitions outside time range
         if (startTime && partition.endTime < startTime) continue;
@@ -256,7 +272,17 @@ class LogRotationService {
 
         if (data) {
           const logs: LogEntry[] = JSON.parse(data);
-          allLogs.push(...logs);
+          
+          // Filter out duplicates across partitions
+          const uniqueLogs = logs.filter((log) => {
+            if (seenIds.has(log.id)) {
+              return false;
+            }
+            seenIds.add(log.id);
+            return true;
+          });
+          
+          allLogs.push(...uniqueLogs);
         }
       }
 

@@ -159,10 +159,13 @@ export class StorageService {
       // Create a map of current profiles by ID
       const currentProfilesMap = new Map(currentProfiles.map((p) => [p.id, p]));
 
-      // Add new profiles from native that don't exist in AsyncStorage
+      // Add new profiles from native or update existing ones
       let hasChanges = false;
       for (const nativeProfile of nativeProfiles) {
-        if (!currentProfilesMap.has(nativeProfile.id)) {
+        const existingProfile = currentProfilesMap.get(nativeProfile.id);
+
+        if (!existingProfile) {
+          // New profile
           currentProfiles.push({
             id: nativeProfile.id,
             name: nativeProfile.name,
@@ -187,7 +190,58 @@ export class StorageService {
           }
 
           hasChanges = true;
-          console.log("✅ Synced profile from native:", nativeProfile.name);
+          console.log("✅ Synced new profile from native:", nativeProfile.name);
+        } else {
+          // Check for updates
+          const hasAuth = !!(nativeProfile.username && nativeProfile.password);
+          const isDifferent =
+            existingProfile.name !== nativeProfile.name ||
+            existingProfile.host !== nativeProfile.host ||
+            existingProfile.port !== nativeProfile.port ||
+            existingProfile.type !== nativeProfile.type ||
+            existingProfile.hasAuth !== hasAuth;
+
+          if (isDifferent) {
+            // Update existing profile metadata
+            existingProfile.name = nativeProfile.name;
+            existingProfile.host = nativeProfile.host;
+            existingProfile.port = nativeProfile.port;
+            existingProfile.type = nativeProfile.type;
+            existingProfile.hasAuth = hasAuth;
+
+            // Find index and update in array
+            const index = currentProfiles.findIndex(
+              (p) => p.id === nativeProfile.id
+            );
+            if (index !== -1) {
+              currentProfiles[index] = existingProfile;
+            }
+
+            hasChanges = true;
+            console.log(
+              "✏️ Synced updated profile from native:",
+              nativeProfile.name
+            );
+          }
+
+          // Always check/update credentials if auth is present
+          // We can't easily check if credentials changed without reading SecureStore,
+          // so we just overwrite if provided by native
+          if (nativeProfile.username && nativeProfile.password) {
+            const credentials: StoredCredentials = {
+              profileId: nativeProfile.id,
+              username: nativeProfile.username,
+              password: nativeProfile.password,
+            };
+            const sanitizedId = this.sanitizeKey(nativeProfile.id);
+            await SecureStore.setItemAsync(
+              `${StorageService.CREDENTIALS_PREFIX}${sanitizedId}`,
+              JSON.stringify(credentials)
+            );
+          } else if (!hasAuth && existingProfile.hasAuth) {
+            // If native has no auth but we thought it did, clear credentials
+            await this.deleteCredentials(nativeProfile.id);
+          }
         }
       }
 

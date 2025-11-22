@@ -62,7 +62,8 @@ class VPNIntentReceiver : BroadcastReceiver() {
             Log.d(TAG, "🛑 Stopping any existing VPN connection...")
             val stopIntent = Intent(context, VPNConnectionService::class.java)
             stopIntent.putExtra("action", "stop")
-            context.startService(stopIntent)
+            // Use context.stopService instead of startService to avoid background service restrictions
+            context.stopService(stopIntent)
 
             // Wait a moment for the stop to complete
             Thread.sleep(500)
@@ -492,7 +493,21 @@ class VPNIntentReceiver : BroadcastReceiver() {
 
     private fun handleAddAndStart(context: Context, intent: Intent) {
         try {
-            // First add or update the profile
+            Log.d(TAG, "🚀 ADD_AND_START requested")
+
+            // 1. Stop existing VPN connection first
+            Log.d(TAG, "🛑 Stopping any existing VPN connection before update...")
+            val stopIntent = Intent(context, VPNConnectionService::class.java)
+            stopIntent.putExtra("action", "stop")
+            // Use context.stopService instead of startService to avoid background service restrictions
+            context.stopService(stopIntent)
+
+            // 2. Wait a moment for the stop to complete
+            // This is a simple blocking wait, which is acceptable in a BroadcastReceiver
+            // for a short duration if it ensures clean state
+            Thread.sleep(1000)
+
+            // 3. Add or update the profile
             handleAddProfile(context, intent)
 
             val name = intent.getStringExtra(EXTRA_PROFILE_NAME)
@@ -501,7 +516,7 @@ class VPNIntentReceiver : BroadcastReceiver() {
                 return
             }
 
-            Log.d(TAG, "🚀 ADD_AND_START requested for: $name")
+            Log.d(TAG, "🚀 Starting VPN for: $name")
 
             // Reload profiles to get the latest data
             val prefs = context.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
@@ -523,6 +538,7 @@ class VPNIntentReceiver : BroadcastReceiver() {
                 return
             }
 
+            // 4. Start VPN with the updated profile
             startVPNWithProfile(context, targetProfile)
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error handling ADD_AND_START: ${e.message}", e)
@@ -646,7 +662,11 @@ class VPNIntentReceiver : BroadcastReceiver() {
             prefs.edit().putBoolean("manually_disconnected", false).apply()
             // Mark that this session was started via automation (ADB)
             prefs.edit().putBoolean("automation_session_active", true).apply()
-            Log.d(TAG, "💾 Cleared manually disconnected flag")
+            
+            // Enable auto-connect when started via ADB/automation
+            // This ensures VPN will auto-reconnect if connection drops
+            prefs.edit().putBoolean("auto_connect_enabled", true).apply()
+            Log.d(TAG, "💾 Cleared manually disconnected flag and enabled auto-connect")
 
             // Save this profile as the last connected profile
             prefs.edit().putString("last_connected_profile_id", profile.getString("id")).apply()

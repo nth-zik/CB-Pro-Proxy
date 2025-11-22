@@ -50,8 +50,15 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
     return unsubscribe;
   }, [navigation, loadProfiles]);
 
-  const handleRefresh = () => {
-    loadProfiles(true); // Force refresh to get latest from native
+  const handleRefresh = async () => {
+    try {
+      await loadProfiles(true); // Force refresh to get latest from native
+      // Optional: Show success message if profiles were synced
+      console.log("✅ Profiles refreshed successfully");
+    } catch (error) {
+      console.error("❌ Failed to refresh profiles:", error);
+      modal.showError("Refresh Failed", "Failed to refresh profiles from storage");
+    }
   };
 
   const handleAddProfile = () => {
@@ -157,13 +164,29 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         refreshControl={
-          <RefreshControl refreshing={isLoading} onRefresh={handleRefresh} />
+          <RefreshControl
+            refreshing={isLoading}
+            onRefresh={handleRefresh}
+            colors={[colors.interactive.primary]}
+            tintColor={colors.interactive.primary}
+            title="Pull to refresh profiles..."
+            titleColor={colors.text.secondary}
+          />
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
+            <Ionicons
+              name="folder-open-outline"
+              size={64}
+              color={colors.text.tertiary}
+              style={styles.emptyIcon}
+            />
             <Text style={styles.emptyText}>No profiles yet</Text>
             <Text style={styles.emptySubtext}>
               Tap "Add Profile" to create your first VPN profile
+            </Text>
+            <Text style={styles.emptySubtext}>
+              Or add via ADB and pull down to refresh
             </Text>
           </View>
         }
@@ -297,6 +320,9 @@ const createStyles = (theme: Theme) =>
       justifyContent: "center",
       paddingVertical: 60,
     },
+    emptyIcon: {
+      marginBottom: theme.spacing.md,
+    },
     emptyText: {
       fontSize: theme.typography.fontSize.lg,
       fontWeight: theme.typography.fontWeight.medium,
@@ -307,5 +333,6 @@ const createStyles = (theme: Theme) =>
       fontSize: theme.typography.fontSize.sm,
       color: theme.colors.text.tertiary,
       textAlign: "center",
+      marginTop: theme.spacing.xs,
     },
   });

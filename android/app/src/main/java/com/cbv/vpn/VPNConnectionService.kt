@@ -48,6 +48,16 @@ class VPNConnectionService : VpnService() {
     private var bytesDown: Long = 0L
     private var publicIp: String? = null
 
+    // Health check mechanism for always-on VPN
+    private var healthCheckThread: Thread? = null
+    private var lastPacketTime: Long = 0L
+    private val HEALTH_CHECK_INTERVAL_MS = 10000L // Check every 10 seconds
+    private val CONNECTION_TIMEOUT_MS = 600000L // Consider dead after 10 minutes (was 30s)
+
+    // Public IP check mechanism
+    private var publicIpCheckThread: Thread? = null
+    private val PUBLIC_IP_CHECK_INTERVAL_MS = 30000L // Check every 30 seconds
+
     private val bytesReceivedReceiver =
             object : android.content.BroadcastReceiver() {
                 override fun onReceive(
@@ -305,9 +315,12 @@ class VPNConnectionService : VpnService() {
             // Start packet forwarding thread
             vpnThread = thread(start = true) { runVPNLoop() }
 
+            // Start health check thread for always-on monitoring
+            startHealthCheckThread()
+
             updateNotification("Connected to $proxyServer (handshaking)")
             broadcastStatus(STATUS_HANDSHAKING, force = true)
-            fetchPublicIpAsync()
+            startPublicIpCheckThread()
         } catch (e: Exception) {
             Log.e(TAG, "Exception in startVPN(): ${e.message}")
             broadcastStatus(STATUS_DISCONNECTED, force = true, error = e.message)
@@ -343,6 +356,7 @@ class VPNConnectionService : VpnService() {
             udpHandler = UDPHandler(this, outputStream)
 
             var packetCount = 0
+            lastPacketTime = System.currentTimeMillis() // Initialize health check timer
 
             while (isRunning) {
                 try {
@@ -350,6 +364,7 @@ class VPNConnectionService : VpnService() {
                     if (length > 0) {
                         packetCount++
                         bytesUp += length
+                        lastPacketTime = System.currentTimeMillis() // Update health check timer
 
                         // Check if packet has TUN header (4 bytes: flags + protocol)
                         var offset = 0
@@ -396,13 +411,33 @@ class VPNConnectionService : VpnService() {
                     }
                 } catch (e: Exception) {
                     if (isRunning) {
-                        Log.e(TAG, "Error in VPN loop: ${e.message}")
+                        Log.e(TAG, "Error in VPN loop: ${e.message}", e)
+                        
+                        // Check if we should attempt to reconnect
+                        val prefs = getSharedPreferences("vpn_prefs", MODE_PRIVATE)
+                        val autoConnectEnabled = prefs.getBoolean("auto_connect_enabled", false)
+                        val manuallyDisconnected = prefs.getBoolean("manually_disconnected", false)
+                        
+                        if (autoConnectEnabled && !manuallyDisconnected) {
+                            Log.d(TAG, "🔄 VPN loop error but auto-reconnect enabled")
+                            // Health check thread will handle reconnection
+                        }
                     }
                     break
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Fatal error in VPN loop: ${e.message}")
+            Log.e(TAG, "Fatal error in VPN loop: ${e.message}", e)
+            
+            // Check if we should attempt to reconnect
+            val prefs = getSharedPreferences("vpn_prefs", MODE_PRIVATE)
+            val autoConnectEnabled = prefs.getBoolean("auto_connect_enabled", false)
+            val manuallyDisconnected = prefs.getBoolean("manually_disconnected", false)
+            
+            if (autoConnectEnabled && !manuallyDisconnected) {
+                Log.d(TAG, "🔄 Fatal VPN error but auto-reconnect enabled")
+                // Health check thread will detect the dead connection and restart
+            }
         } finally {
             connectionManager?.closeAll()
             connectionManager = null
@@ -410,8 +445,85 @@ class VPNConnectionService : VpnService() {
         }
     }
 
-    private fun stopVPN() {
+    private fun startHealthCheckThread() {
+        healthCheckThread?.interrupt()
+        healthCheckThread = thread(name = "vpn-health-check", start = true) {
+            try {
+                Log.d(TAG, "🏥 Health check thread started")
+                var healthCheckCycle = 0
+                
+                while (isRunning) {
+                    Thread.sleep(HEALTH_CHECK_INTERVAL_MS)
+                    
+                    if (!isRunning) break
+                    
+                    healthCheckCycle++
+                    val timeSinceLastPacket = System.currentTimeMillis() - lastPacketTime
+                    
+                    Log.d(TAG, "🏥 Health check #$healthCheckCycle: ${timeSinceLastPacket}ms since last packet")
+                    
+                    if (timeSinceLastPacket > CONNECTION_TIMEOUT_MS) {
+                        Log.w(TAG, "⚠️ VPN connection appears dead (no packets for ${timeSinceLastPacket}ms)")
+                        
+                        // Check if auto-reconnect is enabled
+                        val prefs = getSharedPreferences("vpn_prefs", MODE_PRIVATE)
+                        val autoConnectEnabled = prefs.getBoolean("auto_connect_enabled", false)
+                        val manuallyDisconnected = prefs.getBoolean("manually_disconnected", false)
+                        
+                        if (autoConnectEnabled && !manuallyDisconnected) {
+                            Log.d(TAG, "🔄 Auto-reconnect enabled, attempting to restart VPN...")
+                            
+                            // Save current connection details
+                            val savedServer = proxyServer
+                            val savedServerIP = proxyServerIP
+                            val savedPort = proxyPort
+                            val savedUsername = proxyUsername
+                            val savedPassword = proxyPassword
+                            val savedType = proxyType
+                            
+                            // Stop current connection
+                            stopVPNInternal()
+                            
+                            // Wait a bit before reconnecting
+                            Thread.sleep(2000)
+                            
+                            // Restore connection details
+                            proxyServer = savedServer
+                            proxyServerIP = savedServerIP
+                            proxyPort = savedPort
+                            proxyUsername = savedUsername
+                            proxyPassword = savedPassword
+                            proxyType = savedType
+                            
+                            // Restart VPN
+                            Log.d(TAG, "🚀 Restarting VPN connection to $proxyServer:$proxyPort")
+                            startVPN()
+                        } else {
+                            Log.d(TAG, "⏭️ Auto-reconnect disabled or manually disconnected, stopping VPN")
+                            stopVPNInternal()
+                            stopSelf()
+                        }
+                        break
+                    } else {
+                        Log.d(TAG, "✅ VPN connection is healthy")
+                    }
+                }
+                Log.d(TAG, "🏥 Health check thread ended")
+            } catch (e: InterruptedException) {
+                Log.d(TAG, "🏥 Health check thread interrupted")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error in health check thread: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun stopVPNInternal() {
+        Log.d(TAG, "🛑 Stopping VPN internal...")
         isRunning = false
+
+        // Stop health check thread
+        healthCheckThread?.interrupt()
+        healthCheckThread = null
 
         connectionManager?.closeAll()
         connectionManager = null
@@ -422,13 +534,19 @@ class VPNConnectionService : VpnService() {
         vpnInterface?.close()
         vpnInterface = null
 
-        broadcastStatus(STATUS_DISCONNECTED, force = true)
-
         connectionStartTime = 0L
         bytesUp = 0L
         bytesDown = 0L
         publicIp = null
+        lastPacketTime = 0L
 
+        publicIpCheckThread?.interrupt()
+        publicIpCheckThread = null
+    }
+
+    private fun stopVPN() {
+        stopVPNInternal()
+        broadcastStatus(STATUS_DISCONNECTED, force = true)
         stopForeground(true)
         stopSelf()
     }
@@ -456,30 +574,46 @@ class VPNConnectionService : VpnService() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
-    private fun fetchPublicIpAsync() {
-        thread(name = "public-ip-fetch", start = true) {
+    private fun startPublicIpCheckThread() {
+        publicIpCheckThread?.interrupt()
+        publicIpCheckThread = thread(name = "public-ip-check", start = true) {
             try {
-                Log.d(TAG, "🚀 Starting public IP fetch thread...")
+                Log.d(TAG, "🚀 Starting public IP check thread...")
                 // Wait a bit for VPN to stabilize
                 Thread.sleep(2000)
 
-                broadcastStatus(STATUS_HANDSHAKING, force = true)
+                while (isRunning) {
+                    try {
+                        val fetchedIp = fetchPublicIpViaProxy()
+                        if (fetchedIp != null) {
+                            // Only update if IP changed or it's the first fetch
+                            if (publicIp != fetchedIp) {
+                                publicIp = fetchedIp
+                                Log.d(TAG, "✅ Public IP via proxy: $fetchedIp")
+                                updateNotification("Connected to $proxyServer ($fetchedIp)")
+                                broadcastStatus(STATUS_CONNECTED, force = true, publicIpOverride = fetchedIp)
+                            } else {
+                                Log.d(TAG, "ℹ️ Public IP unchanged: $fetchedIp")
+                            }
+                        } else {
+                            Log.w(TAG, "⚠️ Unable to determine public IP via proxy")
+                            // Don't clear existing IP if check fails, just log it
+                            if (publicIp == null) {
+                                updateNotification("Connected to $proxyServer")
+                                broadcastStatus(STATUS_CONNECTED, force = true)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Error in public IP check loop: ${e.message}", e)
+                    }
 
-                val fetchedIp = fetchPublicIpViaProxy()
-                if (fetchedIp != null) {
-                    publicIp = fetchedIp
-                    Log.d(TAG, "✅ Public IP via proxy: $fetchedIp")
-                    updateNotification("Connected to $proxyServer ($fetchedIp)")
-                    broadcastStatus(STATUS_CONNECTED, force = true, publicIpOverride = fetchedIp)
-                } else {
-                    Log.w(TAG, "⚠️ Unable to determine public IP via proxy")
-                    updateNotification("Connected to $proxyServer")
-                    broadcastStatus(STATUS_CONNECTED, force = true)
+                    // Wait for next check
+                    Thread.sleep(PUBLIC_IP_CHECK_INTERVAL_MS)
                 }
+            } catch (e: InterruptedException) {
+                Log.d(TAG, "🛑 Public IP check thread interrupted")
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Error in fetchPublicIpAsync: ${e.message}", e)
-                updateNotification("Connected to $proxyServer")
-                broadcastStatus(STATUS_CONNECTED, force = true)
+                Log.e(TAG, "❌ Fatal error in public IP check thread: ${e.message}", e)
             }
         }
     }
@@ -723,16 +857,28 @@ class VPNConnectionService : VpnService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        Log.d(TAG, "🔚 VPNConnectionService onDestroy() called")
         try {
             LocalBroadcastManager.getInstance(this).unregisterReceiver(bytesReceivedReceiver)
         } catch (e: Exception) {
             Log.w(TAG, "Error unregistering receiver: ${e.message}")
         }
+        
+        // Stop health check thread
+        healthCheckThread?.interrupt()
+        healthCheckThread = null
+        
         stopVPN()
     }
 
     override fun onRevoke() {
         super.onRevoke()
+        Log.w(TAG, "⚠️ VPN permission revoked by user or system")
+        
+        // Mark as manually disconnected since user revoked permission
+        val prefs = getSharedPreferences("vpn_prefs", MODE_PRIVATE)
+        prefs.edit().putBoolean("manually_disconnected", true).apply()
+        
         stopVPN()
     }
 }
