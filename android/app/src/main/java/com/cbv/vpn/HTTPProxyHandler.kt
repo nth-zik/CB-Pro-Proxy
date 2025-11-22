@@ -1,12 +1,12 @@
 package com.cbv.vpn
 
+import android.util.Base64
 import android.util.Log
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.util.Base64
 
 /**
  * Handle HTTP CONNECT proxy tunneling
@@ -135,7 +135,8 @@ class HTTPProxyHandler(
         // Add authentication if provided
         if (!username.isNullOrEmpty() && !password.isNullOrEmpty()) {
             val credentials = "$username:$password"
-            val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray())
+            // Use Android's Base64 (available on all API levels) instead of java.util.Base64 (API 26+)
+            val encoded = Base64.encodeToString(credentials.toByteArray(), Base64.NO_WRAP)
             request.append("Proxy-Authorization: Basic $encoded\r\n")
             Log.d(TAG, "Added basic auth for user: $username")
         }

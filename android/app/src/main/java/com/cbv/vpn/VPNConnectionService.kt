@@ -817,7 +817,15 @@ class VPNConnectionService : VpnService() {
 
     private fun createNotification(status: String): Notification {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        
+        // Use FLAG_IMMUTABLE on Android 12+ (required), FLAG_UPDATE_CURRENT on older versions
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, pendingIntentFlags)
 
         // Create stop intent
         val stopIntent = Intent(this, VPNConnectionService::class.java)
@@ -827,7 +835,7 @@ class VPNConnectionService : VpnService() {
                         this,
                         1,
                         stopIntent,
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                        pendingIntentFlags
                 )
 
         // Only show stop button when VPN is fully connected (not connecting or handshaking)
