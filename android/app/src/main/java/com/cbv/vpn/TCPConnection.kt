@@ -272,13 +272,22 @@ class TCPConnection(
         }
     }
     
+    private var packetCounter = 0
+    
     private fun handleData(parser: PacketParser) {
-        Log.d(TAG, "📥 Data received: ${parser.payloadLength} bytes (seq=${parser.sequenceNumber})")
+        packetCounter++
+        // Reduce logging frequency - only log every 100th packet or first few
+        if (packetCounter <= 5 || packetCounter % 100 == 0) {
+            Log.d(TAG, "📥 Data received: ${parser.payloadLength} bytes (seq=${parser.sequenceNumber})")
+        }
         
         // Check for duplicate or out-of-order packets
         val expectedSeq = remoteAckNumber
         if (expectedSeq > 0 && parser.sequenceNumber != expectedSeq) {
-            Log.w(TAG, "⚠️ Out-of-order packet: expected seq=$expectedSeq, got=${parser.sequenceNumber}")
+            // Only log out-of-order packets occasionally
+            if (packetCounter % 50 == 0) {
+                Log.w(TAG, "⚠️ Out-of-order packet: expected seq=$expectedSeq, got=${parser.sequenceNumber}")
+            }
             // Re-send last ACK for duplicate packets
             if (parser.sequenceNumber < expectedSeq) {
                 val ack = PacketBuilder.buildACKPacket(parser, localSeqNumber, lastAckSent)
@@ -299,7 +308,10 @@ class TCPConnection(
                 socket?.getOutputStream()?.write(payload)
                 socket?.getOutputStream()?.flush() // Force flush for HTTP proxies
                 totalBytesSent += payload.size
-                Log.d(TAG, "📤 Sent ${payload.size} bytes to proxy (total: $totalBytesSent)")
+                // Reduce logging frequency
+                if (packetCounter <= 5 || packetCounter % 100 == 0) {
+                    Log.d(TAG, "📤 Sent ${payload.size} bytes to proxy (total: $totalBytesSent)")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Error sending to proxy: ${e.message}")
                 sendRST(parser)
@@ -310,7 +322,10 @@ class TCPConnection(
             // Buffer data until connected
             synchronized(sendBuffer) {
                 sendBuffer.add(payload)
-                Log.d(TAG, "📦 Buffered ${payload.size} bytes (waiting for connection, buffer size: ${sendBuffer.size})")
+                // Only log buffer status occasionally
+                if (sendBuffer.size % 10 == 0 || sendBuffer.size == 1) {
+                    Log.d(TAG, "📦 Buffered ${payload.size} bytes (waiting for connection, buffer size: ${sendBuffer.size})")
+                }
             }
         }
         
@@ -355,12 +370,16 @@ class TCPConnection(
                 
                 Log.d(TAG, "🔄 Proxy reader started for $connectionKey")
                 
+                var readCounter = 0
                 while (!isClosed && socket?.isConnected == true) {
                     val length = try {
                         inputStream?.read(buffer) ?: -1
                     } catch (e: java.net.SocketTimeoutException) {
                         // Timeout reading - connection might be stale
-                        Log.w(TAG, "⏱️ Read timeout (connection idle)")
+                        // Reduce logging frequency for timeouts
+                        if (readCounter % 100 == 0) {
+                            Log.w(TAG, "⏱️ Read timeout (connection idle)")
+                        }
                         continue
                     }
                     
@@ -369,8 +388,12 @@ class TCPConnection(
                         break
                     }
                     
+                    readCounter++
                     totalBytesReceived += length
-                    Log.d(TAG, "📬 Received $length bytes from proxy (total: $totalBytesReceived)")
+                    // Reduce logging frequency - only log every 100th read or first few
+                    if (readCounter <= 5 || readCounter % 100 == 0) {
+                        Log.d(TAG, "📬 Received $length bytes from proxy (total: $totalBytesReceived)")
+                    }
                     
                     // Send to VPN in chunks if needed
                     val payload = buffer.copyOfRange(0, length)

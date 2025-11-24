@@ -356,12 +356,14 @@ class VPNConnectionService : VpnService() {
             udpHandler = UDPHandler(this, outputStream)
 
             var packetCount = 0
+            var emptyReadCount = 0
             lastPacketTime = System.currentTimeMillis() // Initialize health check timer
 
             while (isRunning) {
                 try {
                     val length = inputStream.read(buffer)
                     if (length > 0) {
+                        emptyReadCount = 0 // Reset empty read counter
                         packetCount++
                         bytesUp += length
                         lastPacketTime = System.currentTimeMillis() // Update health check timer
@@ -381,11 +383,14 @@ class VPNConnectionService : VpnService() {
                         val parser = PacketParser(buffer, length, offset)
 
                         if (!parser.isValid) {
-                            Log.w(TAG, "❌ Invalid packet at offset=$offset, length=$length")
+                            // Reduce logging frequency for invalid packets
+                            if (packetCount % 100 == 0) {
+                                Log.w(TAG, "❌ Invalid packet at offset=$offset, length=$length")
+                            }
                             continue
                         }
 
-                        // Log first few packets
+                        // Log first few packets only
                         if (packetCount <= 5) {
                             parser.logSummary()
                         }
@@ -404,10 +409,20 @@ class VPNConnectionService : VpnService() {
                             }
                         }
 
-                        // Broadcast status update every 100 packets
-                        if (packetCount % 100 == 0) {
+                        // Broadcast status update every 500 packets (reduced frequency)
+                        if (packetCount % 500 == 0) {
                             broadcastStatus(STATUS_CONNECTED)
                         }
+                    } else {
+                        // No data available - sleep to prevent busy-wait loop
+                        emptyReadCount++
+                        // Use exponential backoff: sleep longer if no packets for a while
+                        val sleepMs = when {
+                            emptyReadCount < 10 -> 1L      // 1ms for first 10 empty reads
+                            emptyReadCount < 50 -> 5L      // 5ms for next 40 empty reads
+                            else -> 10L                    // 10ms for longer idle periods
+                        }
+                        Thread.sleep(sleepMs)
                     }
                 } catch (e: Exception) {
                     if (isRunning) {
