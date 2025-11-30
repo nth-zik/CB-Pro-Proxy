@@ -693,6 +693,51 @@ class VPNModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    @ReactMethod
+    fun openVPNSettings(promise: Promise) {
+        try {
+            // Open VPN app settings page directly (where user can enable always-on for this app)
+            val intent = android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            
+            // Try to open the specific VPN profile settings for this app
+            // On Android 7+, we can use ACTION_VPN_SETTINGS which shows VPN apps list
+            // User can then tap on our app to configure always-on
+            val packageName = reactApplicationContext.packageName
+            Log.d(TAG, "📱 Opening VPN settings for package: $packageName")
+            
+            // For Android 8+, try to open app-specific VPN settings
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                try {
+                    // This opens the VPN settings and highlights VPN apps
+                    val vpnIntent = android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
+                    vpnIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    reactApplicationContext.startActivity(vpnIntent)
+                    promise.resolve(true)
+                    return
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ Could not open VPN settings: ${e.message}")
+                }
+            }
+            
+            // Fallback: open general VPN settings
+            reactApplicationContext.startActivity(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error opening VPN settings: ${e.message}", e)
+            // Fallback to general wireless settings
+            try {
+                val fallbackIntent = android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+                fallbackIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                reactApplicationContext.startActivity(fallbackIntent)
+                promise.resolve(true)
+            } catch (e2: Exception) {
+                Log.e(TAG, "❌ Fallback also failed: ${e2.message}", e2)
+                promise.reject("OPEN_VPN_SETTINGS_ERROR", e.message, e)
+            }
+        }
+    }
+
     private fun setLastConnectedProfileId(profileId: String) {
         try {
             val prefs =

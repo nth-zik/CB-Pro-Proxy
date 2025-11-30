@@ -54,9 +54,15 @@ class VPNConnectionService : VpnService() {
     private val HEALTH_CHECK_INTERVAL_MS = 10000L // Check every 10 seconds
     private val CONNECTION_TIMEOUT_MS = 600000L // Consider dead after 10 minutes (was 30s)
 
+    // Proxy error tracking
+    private var isProxyError = false
+    private var proxyErrorMessage: String? = null
+    private var consecutiveProxyFailures = 0
+    private val MAX_CONSECUTIVE_FAILURES = 3
+
     // Public IP check mechanism
     private var publicIpCheckThread: Thread? = null
-    private val PUBLIC_IP_CHECK_INTERVAL_MS = 30000L // Check every 30 seconds
+    private val PUBLIC_IP_CHECK_INTERVAL_MS = 15000L // Check every 15 seconds
 
     private val bytesReceivedReceiver =
             object : android.content.BroadcastReceiver() {
@@ -66,6 +72,25 @@ class VPNConnectionService : VpnService() {
                 ) {
                     val bytes = intent?.getLongExtra("bytes", 0L) ?: 0L
                     bytesDown += bytes
+                }
+            }
+
+    // Receiver for proxy error/success broadcasts from TCPConnection
+    private val proxyStatusReceiver =
+            object : android.content.BroadcastReceiver() {
+                override fun onReceive(
+                        context: android.content.Context?,
+                        intent: android.content.Intent?
+                ) {
+                    when (intent?.action) {
+                        TCPConnection.ACTION_PROXY_ERROR -> {
+                            val errorMsg = intent.getStringExtra(TCPConnection.EXTRA_ERROR_MESSAGE) ?: "Unknown proxy error"
+                            onProxyError(errorMsg)
+                        }
+                        TCPConnection.ACTION_PROXY_SUCCESS -> {
+                            onProxyRecovered()
+                        }
+                    }
                 }
             }
 
@@ -81,6 +106,7 @@ class VPNConnectionService : VpnService() {
         const val STATUS_DISCONNECTED = "disconnected"
         const val STATUS_CONNECTING = "connecting"
         const val STATUS_HANDSHAKING = "handshaking"
+        const val STATUS_PROXY_ERROR = "proxy_error"
         const val COMMAND_STOP = "stop"
         const val COMMAND_STATUS = "status"
         const val EXTRA_PUBLIC_IP = "publicIp"
@@ -149,6 +175,13 @@ class VPNConnectionService : VpnService() {
         // Register receiver for bytes received from connections via LocalBroadcastManager
         val filter = android.content.IntentFilter("com.cbv.vpn.BYTES_RECEIVED")
         LocalBroadcastManager.getInstance(this).registerReceiver(bytesReceivedReceiver, filter)
+
+        // Register receiver for proxy error/success broadcasts
+        val proxyStatusFilter = android.content.IntentFilter().apply {
+            addAction(TCPConnection.ACTION_PROXY_ERROR)
+            addAction(TCPConnection.ACTION_PROXY_SUCCESS)
+        }
+        LocalBroadcastManager.getInstance(this).registerReceiver(proxyStatusReceiver, proxyStatusFilter)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -555,8 +588,54 @@ class VPNConnectionService : VpnService() {
         publicIp = null
         lastPacketTime = 0L
 
+        // Reset proxy error state
+        isProxyError = false
+        proxyErrorMessage = null
+        consecutiveProxyFailures = 0
+
         publicIpCheckThread?.interrupt()
         publicIpCheckThread = null
+    }
+
+    /**
+     * Handle proxy error - keep VPN icon visible but show error status
+     * VPN interface stays active to maintain the icon on Android
+     */
+    fun onProxyError(errorMessage: String) {
+        Log.e(TAG, "⚠️ Proxy error detected: $errorMessage")
+        consecutiveProxyFailures++
+        
+        if (consecutiveProxyFailures >= MAX_CONSECUTIVE_FAILURES && !isProxyError) {
+            isProxyError = true
+            proxyErrorMessage = errorMessage
+            
+            val statusMessage = "⚠️ Proxy Error - No Internet"
+            updateNotification(statusMessage)
+            broadcastStatus(STATUS_PROXY_ERROR, force = true, error = errorMessage)
+            
+            Log.w(TAG, "🚫 VPN interface kept active but proxy is unreachable")
+        }
+    }
+
+    /**
+     * Clear proxy error state when connection recovers
+     */
+    fun onProxyRecovered() {
+        if (isProxyError) {
+            Log.d(TAG, "✅ Proxy connection recovered")
+            isProxyError = false
+            proxyErrorMessage = null
+            consecutiveProxyFailures = 0
+            
+            if (publicIp != null) {
+                updateNotification("Connected to $proxyServer ($publicIp)")
+            } else {
+                updateNotification("Connected to $proxyServer")
+            }
+            broadcastStatus(STATUS_CONNECTED, force = true)
+        } else {
+            consecutiveProxyFailures = 0
+        }
     }
 
     private fun stopVPN() {
@@ -601,25 +680,45 @@ class VPNConnectionService : VpnService() {
                     try {
                         val fetchedIp = fetchPublicIpViaProxy()
                         if (fetchedIp != null) {
-                            // Only update if IP changed or it's the first fetch
-                            if (publicIp != fetchedIp) {
+                            // Proxy is working - clear error state if any
+                            onProxyRecovered()
+                            
+                            val previousIp = publicIp
+                            
+                            // Check if IP changed
+                            if (previousIp != fetchedIp) {
                                 publicIp = fetchedIp
-                                Log.d(TAG, "✅ Public IP via proxy: $fetchedIp")
+                                Log.d(TAG, "✅ Public IP changed: $previousIp -> $fetchedIp")
+                                
+                                // Update notification with new IP
                                 updateNotification("Connected to $proxyServer ($fetchedIp)")
+                                
+                                // Broadcast status with new IP immediately
                                 broadcastStatus(STATUS_CONNECTED, force = true, publicIpOverride = fetchedIp)
+                                
+                                // Send IP change notification if this is not the first fetch
+                                if (previousIp != null) {
+                                    sendIpChangedNotification(previousIp, fetchedIp)
+                                }
                             } else {
                                 Log.d(TAG, "ℹ️ Public IP unchanged: $fetchedIp")
+                                // Still broadcast periodically to keep UI updated
+                                broadcastStatus(STATUS_CONNECTED, force = false, publicIpOverride = fetchedIp)
                             }
                         } else {
                             Log.w(TAG, "⚠️ Unable to determine public IP via proxy")
+                            // Proxy might be having issues
+                            onProxyError("Failed to fetch public IP - proxy may be unreachable")
+                            
                             // Don't clear existing IP if check fails, just log it
-                            if (publicIp == null) {
+                            if (publicIp == null && !isProxyError) {
                                 updateNotification("Connected to $proxyServer")
                                 broadcastStatus(STATUS_CONNECTED, force = true)
                             }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Error in public IP check loop: ${e.message}", e)
+                        onProxyError("Proxy check failed: ${e.message}")
                     }
 
                     // Wait for next check
@@ -631,6 +730,33 @@ class VPNConnectionService : VpnService() {
                 Log.e(TAG, "❌ Fatal error in public IP check thread: ${e.message}", e)
             }
         }
+    }
+
+    /**
+     * Send a notification when public IP changes
+     */
+    private fun sendIpChangedNotification(oldIp: String, newIp: String) {
+        Log.d(TAG, "📢 Sending IP changed notification: $oldIp -> $newIp")
+        
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 2, intent, pendingIntentFlags)
+        
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("🔄 IP Address Changed")
+            .setContentText("New IP: $newIp (was: $oldIp)")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.notify(NOTIFICATION_ID + 1, notification) // Use different ID for this notification
     }
 
     private fun fetchPublicIpViaProxy(): String? {
@@ -855,17 +981,30 @@ class VPNConnectionService : VpnService() {
 
         // Only show stop button when VPN is fully connected (not connecting or handshaking)
         val isConnected = status.startsWith("Connected to") && !status.contains("handshaking")
+        val isProxyErrorStatus = status.contains("Proxy Error") || status.contains("⚠️")
+
+        // Choose icon based on status
+        val iconRes = if (isProxyErrorStatus) {
+            android.R.drawable.ic_dialog_alert
+        } else {
+            android.R.drawable.ic_lock_lock
+        }
 
         val builder =
                 NotificationCompat.Builder(this, CHANNEL_ID)
-                        .setContentTitle("CBV VPN")
+                        .setContentTitle(if (isProxyErrorStatus) "CBV VPN - Proxy Error" else "CBV VPN")
                         .setContentText(status)
-                        .setSmallIcon(android.R.drawable.ic_lock_lock)
+                        .setSmallIcon(iconRes)
                         .setContentIntent(pendingIntent)
                         .setOngoing(true)
 
-        // Only add stop button when VPN is connected
-        if (isConnected) {
+        // Add priority for error status to make it more visible
+        if (isProxyErrorStatus) {
+            builder.setPriority(NotificationCompat.PRIORITY_HIGH)
+        }
+
+        // Only add stop button when VPN is connected or has proxy error
+        if (isConnected || isProxyErrorStatus) {
             builder.addAction(android.R.drawable.ic_media_pause, "Stop", stopPendingIntent)
         }
 
@@ -884,7 +1023,12 @@ class VPNConnectionService : VpnService() {
         try {
             LocalBroadcastManager.getInstance(this).unregisterReceiver(bytesReceivedReceiver)
         } catch (e: Exception) {
-            Log.w(TAG, "Error unregistering receiver: ${e.message}")
+            Log.w(TAG, "Error unregistering bytesReceivedReceiver: ${e.message}")
+        }
+        try {
+            LocalBroadcastManager.getInstance(this).unregisterReceiver(proxyStatusReceiver)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error unregistering proxyStatusReceiver: ${e.message}")
         }
         
         // Stop health check thread

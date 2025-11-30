@@ -16,6 +16,7 @@ import {
   TouchableOpacity,
   Platform,
   StyleSheet,
+  Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useThemedStyles } from "../hooks/useThemedStyles";
@@ -94,6 +95,27 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     },
     [modal]
   );
+
+  // Open system VPN settings
+  const openVPNSettings = useCallback(async () => {
+    if (Platform.OS === "android") {
+      try {
+        // Use native module to open VPN settings
+        await VPNModule.openVPNSettings();
+      } catch (error) {
+        console.error("Failed to open VPN settings:", error);
+        // Fallback to general settings
+        try {
+          await Linking.openSettings();
+        } catch (e) {
+          modal.showError("Error", "Could not open system settings");
+        }
+      }
+    } else {
+      // iOS - open general settings
+      Linking.openSettings();
+    }
+  }, [modal]);
 
   // Handle theme mode change - memoized to prevent recreation on each render
   const handleThemeModeChange = useCallback(
@@ -217,13 +239,40 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               title="Always Connect VPN"
               subtitle="Automatically connect on device boot"
               rightContent={
-                <ThemedSwitch
-                  value={autoConnect}
-                  onValueChange={handleAutoConnectChange}
-                  disabled={isLoadingAutoConnect}
-                />
+                <View style={styles.alwaysOnRow}>
+                  <ThemedSwitch
+                    value={autoConnect}
+                    onValueChange={handleAutoConnectChange}
+                    disabled={isLoadingAutoConnect}
+                  />
+                </View>
               }
             />
+            {Platform.OS === "android" && (
+              <>
+                <ThemedDivider />
+                <TouchableOpacity onPress={openVPNSettings}>
+                  <ThemedSettingRow
+                    title="System Always-on VPN"
+                    subtitle="Open Android VPN settings to enable always-on"
+                    icon={
+                      <Ionicons
+                        name="settings"
+                        size={24}
+                        color={colors.interactive.primary}
+                      />
+                    }
+                    rightContent={
+                      <Ionicons
+                        name="open-outline"
+                        size={20}
+                        color={colors.text.tertiary}
+                      />
+                    }
+                  />
+                </TouchableOpacity>
+              </>
+            )}
             <ThemedDivider />
             <ThemedSettingRow
               title="Notifications"
@@ -365,6 +414,11 @@ const createStyles = (theme: Theme) =>
       position: "absolute",
       top: theme.spacing.xs,
       right: theme.spacing.xs,
+    },
+    alwaysOnRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.sm,
     },
     footer: {
       height: theme.spacing.xl,

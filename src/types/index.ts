@@ -7,6 +7,7 @@ export type VPNStatus =
   | "connecting"
   | "handshaking"
   | "connected"
+  | "proxy_error"
   | "error";
 
 export interface VPNConnectionStats {

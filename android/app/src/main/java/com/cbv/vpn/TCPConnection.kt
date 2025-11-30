@@ -1,10 +1,12 @@
 package com.cbv.vpn
 
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.VpnService
 import android.util.Log
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import java.io.FileDescriptor
 import java.io.FileOutputStream
 import java.net.InetSocketAddress
@@ -38,6 +40,31 @@ class TCPConnection(
     private val sendBuffer = mutableListOf<ByteArray>()
     private var totalBytesReceived = 0L
     private var totalBytesSent = 0L
+
+    companion object {
+        const val ACTION_PROXY_ERROR = "com.cbv.vpn.PROXY_ERROR"
+        const val ACTION_PROXY_SUCCESS = "com.cbv.vpn.PROXY_SUCCESS"
+        const val EXTRA_ERROR_MESSAGE = "error_message"
+    }
+
+    private fun broadcastProxyError(errorMessage: String) {
+        try {
+            val intent = Intent(ACTION_PROXY_ERROR)
+            intent.putExtra(EXTRA_ERROR_MESSAGE, errorMessage)
+            LocalBroadcastManager.getInstance(vpnService).sendBroadcast(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to broadcast proxy error: ${e.message}")
+        }
+    }
+
+    private fun broadcastProxySuccess() {
+        try {
+            val intent = Intent(ACTION_PROXY_SUCCESS)
+            LocalBroadcastManager.getInstance(vpnService).sendBroadcast(intent)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to broadcast proxy success: ${e.message}")
+        }
+    }
     
     fun handlePacket(parser: PacketParser) {
         try {
@@ -157,6 +184,7 @@ class TCPConnection(
             // Socket already created and protected in handleSYN
             if (socket == null) {
                 Log.e(TAG, "❌ Socket is null in connectToProxy")
+                broadcastProxyError("Socket is null - cannot connect to proxy")
                 sendRST(parser)
                 return
             }
@@ -181,6 +209,7 @@ class TCPConnection(
                 Log.d(TAG, "ℹ️ Destination is proxy itself - skipping CONNECT and bridging directly")
                 if (!connectDirectly(parser)) {
                     Log.e(TAG, "❌ Failed to establish direct connection to proxy")
+                    broadcastProxyError("Failed to connect directly to proxy server")
                     sendRST(parser)
                     return
                 }
@@ -194,18 +223,30 @@ class TCPConnection(
                 
                 if (!success) {
                     Log.e(TAG, "❌ Failed to connect through proxy")
+                    broadcastProxyError("Proxy connection failed for ${parser.destAddress}:${parser.destPort}")
                     sendRST(parser)
                     return
                 }
                 
+                // Connection successful - notify recovery
+                broadcastProxySuccess()
                 onConnected(parser)
                 Log.d(TAG, "✅ Connected to ${parser.destAddress}:${parser.destPort} via proxy")
             }
             
             // Start reading from proxy (already started inside onConnected/direct path)
             
+        } catch (e: java.net.ConnectException) {
+            Log.e(TAG, "❌ Proxy connection refused: ${e.message}")
+            broadcastProxyError("Proxy server connection refused")
+            sendRST(parser)
+        } catch (e: java.net.SocketTimeoutException) {
+            Log.e(TAG, "❌ Proxy connection timeout: ${e.message}")
+            broadcastProxyError("Proxy server connection timeout")
+            sendRST(parser)
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error connecting to proxy: ${e.message}")
+            broadcastProxyError("Proxy error: ${e.message}")
             sendRST(parser)
         }
     }

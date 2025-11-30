@@ -35,6 +35,7 @@ type NativeVPNModuleShape = {
   refreshStatus(): void;
   setAutoConnectEnabled(enabled: boolean): Promise<void>;
   getAutoConnectEnabled(): Promise<boolean>;
+  openVPNSettings(): Promise<boolean>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 };
@@ -111,6 +112,14 @@ const normalizeStatus = (payload: NativeStatusPayload): VPNStatusInfo => {
   if (payload?.state === "handshaking") {
     return {
       state: "handshaking",
+      isConnected: false,
+      stats,
+    };
+  }
+
+  if (payload?.state === "proxy_error") {
+    return {
+      state: "proxy_error",
       isConnected: false,
       stats,
     };
@@ -344,6 +353,17 @@ export const VPNModule = {
         "vpn",
         error as Error
       );
+      throw error;
+    }
+  },
+  openVPNSettings: async (): Promise<boolean> => {
+    try {
+      logger.debug("Opening system VPN settings", "vpn");
+      const result = await NativeVPNModule.openVPNSettings();
+      logger.debug("Opened system VPN settings", "vpn");
+      return result;
+    } catch (error) {
+      logger.error("Failed to open VPN settings", "vpn", error as Error);
       throw error;
     }
   },

@@ -460,6 +460,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
       case "connecting":
       case "handshaking":
         return colors.status.warning;
+      case "proxy_error":
       case "error":
         return colors.status.error;
       default:
@@ -475,6 +476,8 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
         return "Connecting...";
       case "handshaking":
         return "Handshaking...";
+      case "proxy_error":
+        return "⚠️ Proxy Error - No Internet";
       case "error":
         return "Error";
       default:

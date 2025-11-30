@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -27,6 +27,10 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
   const styles = useThemedStyles(createStyles);
   const { colors } = useTheme();
   const modal = useCustomModal();
+
+  // Bulk selection state
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const {
     profiles,
@@ -87,6 +91,12 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
   };
 
   const handleSelectProfile = async (profile: ProxyProfile) => {
+    // If in selection mode, toggle selection instead
+    if (isSelectionMode) {
+      toggleSelection(profile.id);
+      return;
+    }
+    
     try {
       await selectProfile(profile.id);
       // Navigate to Home tab instead of Connection screen
@@ -96,67 +106,229 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
     }
   };
 
+  // Bulk selection handlers
+  const toggleSelectionMode = () => {
+    setIsSelectionMode(!isSelectionMode);
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelection = (id: string) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const selectAll = () => {
+    const allIds = new Set(profiles.map(p => p.id));
+    setSelectedIds(allIds);
+  };
+
+  const deselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedIds.size === 0) {
+      modal.showInfo("No Selection", "Please select profiles to delete");
+      return;
+    }
+
+    const count = selectedIds.size;
+    modal.showConfirm(
+      "Delete Selected",
+      `Are you sure you want to delete ${count} profile${count > 1 ? 's' : ''}?`,
+      async () => {
+        try {
+          for (const id of selectedIds) {
+            await deleteProfile(id);
+          }
+          setSelectedIds(new Set());
+          setIsSelectionMode(false);
+        } catch (error) {
+          modal.showError("Error", "Failed to delete some profiles");
+        }
+      },
+      undefined,
+      "Delete",
+      "Cancel"
+    );
+  };
+
+  const handleDeleteAll = () => {
+    if (profiles.length === 0) {
+      modal.showInfo("No Profiles", "There are no profiles to delete");
+      return;
+    }
+
+    modal.showConfirm(
+      "Delete All Profiles",
+      `Are you sure you want to delete ALL ${profiles.length} profile${profiles.length > 1 ? 's' : ''}? This action cannot be undone.`,
+      async () => {
+        try {
+          for (const profile of profiles) {
+            await deleteProfile(profile.id);
+          }
+          setSelectedIds(new Set());
+          setIsSelectionMode(false);
+        } catch (error) {
+          modal.showError("Error", "Failed to delete some profiles");
+        }
+      },
+      undefined,
+      "Delete All",
+      "Cancel"
+    );
+  };
+
   const renderProfile = ({ item }: { item: ProxyProfile }) => {
     const isActive = item.id === activeProfileId;
+    const isSelected = selectedIds.has(item.id);
 
     return (
       <TouchableOpacity
-        style={[styles.profileItem, isActive && styles.activeProfileItem]}
+        style={[
+          styles.profileItem, 
+          isActive && styles.activeProfileItem,
+          isSelected && styles.selectedProfileItem
+        ]}
         onPress={() => handleSelectProfile(item)}
+        onLongPress={() => {
+          if (!isSelectionMode) {
+            setIsSelectionMode(true);
+            toggleSelection(item.id);
+          }
+        }}
       >
-        <View style={styles.profileInfo}>
-          <View style={styles.profileHeader}>
-            <Text style={styles.profileName}>{item.name}</Text>
-            {isActive && (
-              <View style={styles.activeIndicator}>
-                <Text style={styles.activeText}>ACTIVE</Text>
+        <View style={styles.profileRow}>
+          {/* Checkbox for selection mode */}
+          {isSelectionMode && (
+            <TouchableOpacity 
+              style={styles.checkboxContainer}
+              onPress={() => toggleSelection(item.id)}
+            >
+              <Ionicons
+                name={isSelected ? "checkbox" : "square-outline"}
+                size={24}
+                color={isSelected ? colors.interactive.primary : colors.text.tertiary}
+              />
+            </TouchableOpacity>
+          )}
+          
+          <View style={[styles.profileInfo, isSelectionMode && styles.profileInfoWithCheckbox]}>
+            <View style={styles.profileHeader}>
+              <Text style={styles.profileName}>{item.name}</Text>
+              {isActive && (
+                <View style={styles.activeIndicator}>
+                  <Text style={styles.activeText}>ACTIVE</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.profileDetails}>
+              {item.type.toUpperCase()} • {item.host}:{item.port}
+            </Text>
+            {item.username && (
+              <View style={styles.profileAuth}>
+                <Ionicons
+                  name="shield-checkmark"
+                  size={14}
+                  color={colors.status.success}
+                  style={styles.authIcon}
+                />
+                <Text style={styles.profileAuthText}>Authenticated</Text>
               </View>
             )}
           </View>
-          <Text style={styles.profileDetails}>
-            {item.type.toUpperCase()} • {item.host}:{item.port}
-          </Text>
-          {item.username && (
-            <View style={styles.profileAuth}>
-              <Ionicons
-                name="shield-checkmark"
-                size={14}
-                color={colors.status.success}
-                style={styles.authIcon}
-              />
-              <Text style={styles.profileAuthText}>Authenticated</Text>
-            </View>
-          )}
         </View>
 
-        <View style={styles.profileActions}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleEditProfile(item)}
-          >
-            <Text style={styles.actionButtonText}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, styles.deleteButton]}
-            onPress={() => handleDeleteProfile(item)}
-          >
-            <Text style={[styles.actionButtonText, styles.deleteButtonText]}>
-              Delete
-            </Text>
-          </TouchableOpacity>
-        </View>
+        {/* Hide individual actions in selection mode */}
+        {!isSelectionMode && (
+          <View style={styles.profileActions}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => handleEditProfile(item)}
+            >
+              <Text style={styles.actionButtonText}>Edit</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.deleteButton]}
+              onPress={() => handleDeleteProfile(item)}
+            >
+              <Text style={[styles.actionButtonText, styles.deleteButtonText]}>
+                Delete
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-      <View style={styles.header}>
-        <Text style={styles.title}>VPN Profiles</Text>
-        <TouchableOpacity style={styles.addButton} onPress={handleAddProfile}>
-          <Text style={styles.addButtonText}>+ Add Profile</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Normal header */}
+      {!isSelectionMode ? (
+        <View style={styles.header}>
+          <Text style={styles.title}>VPN Profiles</Text>
+          <View style={styles.headerActions}>
+            {profiles.length > 0 && (
+              <>
+                <TouchableOpacity 
+                  style={styles.headerIconButton} 
+                  onPress={toggleSelectionMode}
+                >
+                  <Ionicons name="checkbox-outline" size={22} color={colors.text.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.headerIconButton} 
+                  onPress={handleDeleteAll}
+                >
+                  <Ionicons name="trash-outline" size={22} color={colors.status.error} />
+                </TouchableOpacity>
+              </>
+            )}
+            <TouchableOpacity style={styles.addButton} onPress={handleAddProfile}>
+              <Text style={styles.addButtonText}>+ Add</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        /* Selection mode header */
+        <View style={styles.header}>
+          <View style={styles.selectionHeader}>
+            <TouchableOpacity onPress={toggleSelectionMode}>
+              <Ionicons name="close" size={24} color={colors.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.selectionCount}>
+              {selectedIds.size} selected
+            </Text>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity 
+              style={styles.selectAllButton} 
+              onPress={selectedIds.size === profiles.length ? deselectAll : selectAll}
+            >
+              <Text style={styles.selectAllText}>
+                {selectedIds.size === profiles.length ? "Deselect All" : "Select All"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[
+                styles.deleteSelectedButton,
+                selectedIds.size === 0 && styles.disabledButton
+              ]} 
+              onPress={handleDeleteSelected}
+              disabled={selectedIds.size === 0}
+            >
+              <Ionicons name="trash" size={18} color={colors.text.inverse} />
+              <Text style={styles.deleteSelectedText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       <FlatList
         data={profiles}
@@ -218,6 +390,50 @@ const createStyles = (theme: Theme) =>
       fontWeight: theme.typography.fontWeight.bold,
       color: theme.colors.text.primary,
     },
+    headerActions: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.sm,
+    },
+    headerIconButton: {
+      padding: theme.spacing.sm,
+    },
+    selectionHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.sm,
+    },
+    selectionCount: {
+      fontSize: theme.typography.fontSize.lg,
+      fontWeight: theme.typography.fontWeight.medium,
+      color: theme.colors.text.primary,
+    },
+    selectAllButton: {
+      paddingHorizontal: theme.spacing.sm,
+      paddingVertical: theme.spacing.xs,
+    },
+    selectAllText: {
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.interactive.primary,
+      fontWeight: theme.typography.fontWeight.medium,
+    },
+    deleteSelectedButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: theme.colors.status.error,
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.sm,
+      borderRadius: theme.borderRadius.md,
+      gap: theme.spacing.xs,
+    },
+    deleteSelectedText: {
+      color: theme.colors.text.inverse,
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.medium,
+    },
+    disabledButton: {
+      opacity: 0.5,
+    },
     addButton: {
       backgroundColor: theme.colors.interactive.primary,
       paddingHorizontal: theme.spacing.md,
@@ -250,8 +466,24 @@ const createStyles = (theme: Theme) =>
       shadowRadius: 8,
       elevation: 6,
     },
+    selectedProfileItem: {
+      borderWidth: 2,
+      borderColor: theme.colors.interactive.primary,
+    },
+    profileRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+    },
+    checkboxContainer: {
+      marginRight: theme.spacing.sm,
+      paddingTop: 2,
+    },
     profileInfo: {
       marginBottom: theme.spacing.md,
+      flex: 1,
+    },
+    profileInfoWithCheckbox: {
+      marginBottom: 0,
     },
     profileHeader: {
       flexDirection: "row",
