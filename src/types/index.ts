@@ -33,6 +33,23 @@ export interface ProxyProfile {
   password?: string;
   dns1?: string;
   dns2?: string;
+  tags?: string[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ProxySource {
+  id: string;
+  name: string;                              // Source name (e.g., "Premium Proxies")
+  url: string;                               // URL to fetch proxies from
+  defaultProtocol?: ProxyType;               // Default protocol if not in data
+  tags?: string[];                           // Auto-assign tags to imported proxies
+  autoFetch: boolean;                        // Enable/disable periodic fetch
+  fetchIntervalHours: number;                // Hours between fetches (default: 24)
+  lastFetchAt?: Date;                        // Last fetch timestamp
+  lastFetchStatus?: 'success' | 'error';     // Last fetch result
+  lastFetchError?: string;                   // Last error message (if any)
+  proxiesCount?: number;                     // Number of proxies imported last time
   createdAt: Date;
   updatedAt: Date;
 }
@@ -72,6 +89,7 @@ export interface StoredProfile {
   port: number;
   type: ProxyType;
   hasAuth: boolean;
+  tags?: string[];
 }
 
 export interface StoredCredentials {

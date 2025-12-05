@@ -50,6 +50,16 @@ Whether you're running Selenium tests, Appium scripts, or custom automation work
 
 ### 🆕 New Features (v1.0)
 
+- **High-Performance SQLite Storage** 🚀
+
+  - **15-40x faster** bulk operations compared to AsyncStorage
+  - Efficient database queries with indexing
+  - Automatic migration from AsyncStorage
+  - Transaction-based operations for data integrity
+  - Handles thousands of profiles effortlessly
+  - Secure credential storage (passwords in SecureStore)
+  - [User Guide →](./docs/SQLITE_USER_GUIDE.md) | [Testing Guide →](./docs/SQLITE_TESTING_GUIDE.md)
+
 - **Comprehensive Logging System** 🔍
 
   - Multi-level logging (debug, info, warn, error, critical)
@@ -226,6 +236,21 @@ Comprehensive documentation is available for all features:
   - Data flow diagrams
   - Storage strategies
   - Performance considerations
+
+### Storage & Performance
+
+- **[SQLite User Guide](./docs/SQLITE_USER_GUIDE.md)** - High-performance storage
+  - Feature overview and benefits
+  - How to enable SQLite storage
+  - Migration process explained
+  - Performance expectations (15-40x faster)
+  - Troubleshooting and FAQ
+
+- **[SQLite Testing Guide](./docs/SQLITE_TESTING_GUIDE.md)** - Testing procedures
+  - Comprehensive test scenarios
+  - Performance benchmarking
+  - Migration testing
+  - Data integrity verification
 
 ### Testing
 

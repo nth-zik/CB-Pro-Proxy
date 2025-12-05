@@ -8,6 +8,7 @@ import { ThemeProvider } from "./src/contexts/ThemeContext";
 import { useThemeStore } from "./src/store/themeStore";
 import { initializeLoggingStore } from "./src/store/loggingStore";
 import { logger } from "./src/services/LoggerService";
+import { proxySourceService } from "./src/services/ProxySourceService";
 
 // Global error handler for unhandled errors
 const setupGlobalErrorHandlers = () => {
@@ -46,6 +47,9 @@ function AppContent() {
     logger.info("App started successfully", "app");
     logger.debug("Logging system initialized", "app");
     logger.info("VPN service ready", "vpn");
+
+    // Start periodic proxy source fetch (check every hour)
+    proxySourceService.startPeriodicFetch(60);
 
     // Test crypto availability
     try {

@@ -373,15 +373,15 @@ class VPNConnectionService : VpnService() {
                         SOCKS5ProxyHandler(
                                 proxyServerIP,
                                 proxyPort,
-                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
-                                if (proxyPassword.isNotEmpty()) proxyPassword else null
+                                if (proxyUsername.isNotBlank()) proxyUsername.trim() else null,
+                                if (proxyPassword.isNotBlank()) proxyPassword.trim() else null
                         )
                     } else {
                         HTTPProxyHandler(
                                 proxyServerIP,
                                 proxyPort,
-                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
-                                if (proxyPassword.isNotEmpty()) proxyPassword else null
+                                if (proxyUsername.isNotBlank()) proxyUsername.trim() else null,
+                                if (proxyPassword.isNotBlank()) proxyPassword.trim() else null
                         )
                     }
 

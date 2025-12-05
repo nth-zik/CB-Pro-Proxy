@@ -6,6 +6,7 @@ import {
   VPNStatusInfo,
   VPNConnectionStats,
 } from "../types";
+import { BulkOperationResult } from "../types/database";
 import { logger } from "../services/LoggerService";
 
 interface ProfileNotification {
@@ -34,8 +35,10 @@ interface VPNStore {
   // Actions - Profile Management
   loadProfiles: (forceRefresh?: boolean) => Promise<void>;
   addProfile: (profile: ProxyProfile) => Promise<void>;
+  addProfiles: (profiles: ProxyProfile[]) => Promise<void>;
   updateProfile: (profile: ProxyProfile) => Promise<void>;
   deleteProfile: (id: string) => Promise<void>;
+  bulkDeleteProfiles: (ids: string[]) => Promise<BulkOperationResult>;
   selectProfile: (id: string) => Promise<void>;
 
   // Actions - VPN Control
@@ -94,64 +97,66 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
 
     // Skip if already loaded and not forcing refresh
     if (state.profilesLoaded && state.profiles.length > 0 && !forceRefresh) {
-      logger.debug("Profiles already loaded, skipping reload", "vpn", {
-        profileCount: state.profiles.length,
-      });
+      // Removed verbose log: logger.debug("Profiles already loaded, skipping reload"...);
       return;
     }
 
     try {
-      logger.debug("Loading VPN profiles", "vpn", { forceRefresh });
+      // Removed verbose log: logger.debug("Loading VPN profiles", "vpn", { forceRefresh });
       set({ isLoading: true, error: null });
 
-      // Load profiles từ storage
-      const profiles = await storageService.getProfiles();
-      logger.debug("Profiles loaded from storage", "storage", {
-        count: profiles.length,
-      });
+      // Load profiles from storage
+      const profiles = await storageService.getProfiles(forceRefresh);
 
-      // Load selected profile từ native SharedPreferences (priority)
-      // This ensures we get the profile set via ADB or native code
-      let selectedProfileId: string | null = null;
-      try {
-        const { VPNModule } = await import("../native");
-        selectedProfileId = await VPNModule.getActiveProfileId();
-        logger.debug("Loaded active profile from native", "vpn", {
-          profileId: selectedProfileId,
-        });
-      } catch (nativeError) {
-        logger.warn(
-          "Failed to load active profile from native, falling back to AsyncStorage",
-          "vpn",
-          nativeError
-        );
-      }
+      // Load initial active profile from AsyncStorage (fast)
+      const storedId = await AsyncStorage.getItem(SELECTED_PROFILE_KEY);
 
-      // Fallback to AsyncStorage if native returns null
-      if (!selectedProfileId) {
-        selectedProfileId = await AsyncStorage.getItem(SELECTED_PROFILE_KEY);
-        logger.debug("Loaded active profile from AsyncStorage", "storage", {
-          profileId: selectedProfileId,
-        });
-      }
-
-      // Sync to AsyncStorage if we got it from native
-      if (selectedProfileId) {
-        await AsyncStorage.setItem(SELECTED_PROFILE_KEY, selectedProfileId);
-      }
-
+      // Update state immediately with stored data
       set({
         profiles,
-        activeProfileId: selectedProfileId,
+        activeProfileId: storedId,
         isLoading: false,
         profilesLoaded: true,
       });
-      logger.info("VPN profiles loaded successfully", "vpn", {
-        profileCount: profiles.length,
-        activeProfileId: selectedProfileId,
-      });
+
+      // Sync with Native in background to check for active VPN state
+      (async () => {
+        try {
+          const { VPNModule } = await import("../native");
+          const status = await VPNModule.getStatus();
+          const isVPNActive =
+            status?.state === "connected" || status?.state === "connecting";
+
+          let nativeProfileId: string | null = null;
+
+          if (isVPNActive) {
+            // If VPN is active, trust Native source of truth
+            nativeProfileId = await VPNModule.getActiveProfileId();
+
+            if (nativeProfileId && nativeProfileId !== storedId) {
+              logger.info("Syncing active profile with native module", "vpn", {
+                stored: storedId,
+                native: nativeProfileId,
+              });
+              set({ activeProfileId: nativeProfileId });
+              await AsyncStorage.setItem(SELECTED_PROFILE_KEY, nativeProfileId);
+            }
+          } else if (!storedId) {
+            // Fallback if no stored ID
+            nativeProfileId = await VPNModule.getActiveProfileId();
+            if (nativeProfileId) {
+              set({ activeProfileId: nativeProfileId });
+              await AsyncStorage.setItem(SELECTED_PROFILE_KEY, nativeProfileId);
+            }
+          }
+        } catch (nativeError) {
+          // Ignore native errors as we already have data
+          // logger.warn("Background native sync failed", "vpn", nativeError);
+        }
+      })();
     } catch (error) {
-      logger.error("Failed to load VPN profiles", "vpn", error as Error);
+      const errorMsg = normalizeErrorMessage(error) || "Unknown error";
+      logger.error("Failed to load VPN profiles", "vpn", new Error(errorMsg));
       set({
         error: "Failed to load profiles",
         isLoading: false,
@@ -179,11 +184,40 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
         profileName: profile.name,
       });
     } catch (error) {
-      logger.error("Failed to add VPN profile", "vpn", error as Error, {
+      const errorMsg = normalizeErrorMessage(error) || "Unknown error";
+      logger.error("Failed to add VPN profile", "vpn", new Error(errorMsg), {
         profileId: profile.id,
       });
       set({
         error: "Failed to add profile",
+        isLoading: false,
+      });
+      throw error;
+    }
+  },
+
+  addProfiles: async (newProfiles: ProxyProfile[]) => {
+    if (newProfiles.length === 0) return;
+    try {
+      logger.info(`Adding ${newProfiles.length} VPN profiles`, "vpn");
+      set({ isLoading: true, error: null });
+
+      await storageService.saveProfiles(newProfiles);
+
+      const profiles = [...get().profiles, ...newProfiles];
+      set({ profiles, isLoading: false, profilesLoaded: true });
+      logger.info("VPN profiles bulk added successfully", "vpn", {
+        count: newProfiles.length,
+      });
+    } catch (error) {
+      const errorMsg = normalizeErrorMessage(error) || "Unknown error";
+      logger.error(
+        "Failed to bulk add VPN profiles",
+        "vpn",
+        new Error(errorMsg)
+      );
+      set({
+        error: "Failed to bulk add profiles",
         isLoading: false,
       });
       throw error;
@@ -212,7 +246,8 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
         profileName: profile.name,
       });
     } catch (error) {
-      logger.error("Failed to update VPN profile", "vpn", error as Error, {
+      const errorMsg = normalizeErrorMessage(error) || "Unknown error";
+      logger.error("Failed to update VPN profile", "vpn", new Error(errorMsg), {
         profileId: profile.id,
       });
       set({
@@ -257,11 +292,66 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
         profileName,
       });
     } catch (error) {
-      logger.error("Failed to delete VPN profile", "vpn", error as Error, {
+      const errorMsg = normalizeErrorMessage(error) || "Unknown error";
+      logger.error("Failed to delete VPN profile", "vpn", new Error(errorMsg), {
         profileId: id,
       });
       set({
         error: "Failed to delete profile",
+        isLoading: false,
+      });
+      throw error;
+    }
+  },
+
+  bulkDeleteProfiles: async (ids: string[]) => {
+    if (ids.length === 0) {
+      return {
+        success: true,
+        totalCount: 0,
+        successCount: 0,
+        failureCount: 0,
+        errors: [],
+      };
+    }
+
+    try {
+      logger.info(`Bulk deleting ${ids.length} VPN profiles`, "vpn");
+      set({ isLoading: true, error: null });
+
+      // Use batch deletion from storage service
+      const result = await storageService.bulkDeleteProfiles(ids);
+
+      // Update state by filtering out deleted profiles
+      const profiles = get().profiles.filter((p) => !ids.includes(p.id));
+      
+      // Check if active profile was deleted
+      let activeProfileId = get().activeProfileId;
+      if (activeProfileId && ids.includes(activeProfileId)) {
+        activeProfileId = null;
+        await AsyncStorage.removeItem(SELECTED_PROFILE_KEY);
+        logger.debug("Cleared active profile selection (deleted in bulk)", "vpn");
+      }
+
+      set({
+        profiles,
+        activeProfileId,
+        isLoading: false,
+        profilesLoaded: profiles.length > 0,
+      });
+
+      logger.info("Bulk delete completed", "vpn", {
+        total: result.totalCount,
+        success: result.successCount,
+        failed: result.failureCount,
+      });
+
+      return result;
+    } catch (error) {
+      const errorMsg = normalizeErrorMessage(error) || "Unknown error";
+      logger.error("Failed to bulk delete VPN profiles", "vpn", new Error(errorMsg));
+      set({
+        error: "Failed to bulk delete profiles",
         isLoading: false,
       });
       throw error;
@@ -277,16 +367,26 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
       });
       set({ error: null });
 
-      // Persist selected profile
-      await AsyncStorage.setItem(SELECTED_PROFILE_KEY, id);
-
+      // Optimistic update: Update state immediately without waiting for storage
       set({ activeProfileId: id });
+
+      // Persist to storage in background
+      AsyncStorage.setItem(SELECTED_PROFILE_KEY, id).catch((err) => {
+        const errorMsg = normalizeErrorMessage(err) || "Unknown error";
+        logger.error(
+          "Failed to persist selected profile",
+          "vpn",
+          new Error(errorMsg)
+        );
+      });
+
       logger.debug("VPN profile selected successfully", "vpn", {
         profileId: id,
         profileName,
       });
     } catch (error) {
-      logger.error("Failed to select VPN profile", "vpn", error as Error, {
+      const errorMsg = normalizeErrorMessage(error) || "Unknown error";
+      logger.error("Failed to select VPN profile", "vpn", new Error(errorMsg), {
         profileId: id,
       });
       set({ error: "Failed to select profile" });
@@ -306,15 +406,13 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
       const profileName =
         get().profiles.find((p) => p.id === get().activeProfileId)?.name ||
         "Unknown";
+      // Only log important status changes (connected/error) to reduce noise
       if (status === "connected") {
         logger.info(`✅ Connection successful: ${profileName}`, "vpn");
-      } else if (status === "connecting") {
-        logger.info(`🔄 Connecting: ${profileName}`, "vpn");
-      } else if (status === "disconnected") {
-        logger.info(`⚪ Disconnected: ${profileName}`, "vpn");
       } else if (status === "error") {
         logger.error(`❌ Connection failed: ${profileName}`, "vpn");
       }
+      // Removed connecting/disconnected logs
 
       set({
         vpnStatus: status,
@@ -349,6 +447,8 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
     const profileName =
       get().profiles.find((p) => p.id === get().activeProfileId)?.name ||
       "Unknown";
+
+    // Only log important status changes (connected/error)
     if (statusInfo.state === "connected") {
       const connectionTime = new Date().toLocaleString("en-US");
       logger.info(
@@ -358,13 +458,10 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
           publicIp: statusInfo.stats.publicIp,
         }
       );
-    } else if (statusInfo.state === "connecting") {
-      logger.info(`🔄 Connecting: ${profileName}`, "vpn");
-    } else if (statusInfo.state === "disconnected") {
-      logger.info(`⚪ Disconnected: ${profileName}`, "vpn");
     } else if (statusInfo.state === "error") {
       logger.error(`❌ Connection failed: ${profileName}`, "vpn");
     }
+    // Removed connecting/disconnected logs
 
     set({
       vpnStatus: statusInfo.state,

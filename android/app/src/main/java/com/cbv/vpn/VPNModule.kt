@@ -173,30 +173,37 @@ class VPNModule(reactContext: ReactApplicationContext) :
 
             if (resultCode == Activity.RESULT_OK) {
                 Log.d(TAG, "✅ VPN permission GRANTED by user")
-                Log.d(TAG, "🚀 Starting VPN service...")
-                pendingProfile?.let { profile ->
-                    try {
-                        startVPNService(profile)
-                        lastDuration = 0L
-                        lastBytesUp = 0L
-                        lastBytesDown = 0L
-                        lastPublicIp = null
-                        sendStatusEvent(
-                                state = "connecting",
-                                isConnectedFlag = false,
-                                duration = 0L,
-                                bytesUp = 0L,
-                                bytesDown = 0L,
-                                publicIp = null
-                        )
-                        pendingVPNPromise?.resolve(null)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "========================================")
-                        Log.e(TAG, "❌ Error starting VPN after permission")
-                        Log.e(TAG, "❌ Exception: ${e.message}")
-                        Log.e(TAG, "========================================")
-                        e.printStackTrace()
-                        pendingVPNPromise?.reject("VPN_START_ERROR", e.message, e)
+                
+                // Check if this is just a permission check (no profile)
+                if (pendingProfile == null) {
+                    Log.d(TAG, "✅ Permission-only check completed successfully")
+                    pendingVPNPromise?.resolve(true)
+                } else {
+                    Log.d(TAG, "🚀 Starting VPN service...")
+                    pendingProfile?.let { profile ->
+                        try {
+                            startVPNService(profile)
+                            lastDuration = 0L
+                            lastBytesUp = 0L
+                            lastBytesDown = 0L
+                            lastPublicIp = null
+                            sendStatusEvent(
+                                    state = "connecting",
+                                    isConnectedFlag = false,
+                                    duration = 0L,
+                                    bytesUp = 0L,
+                                    bytesDown = 0L,
+                                    publicIp = null
+                            )
+                            pendingVPNPromise?.resolve(null)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "========================================")
+                            Log.e(TAG, "❌ Error starting VPN after permission")
+                            Log.e(TAG, "❌ Exception: ${e.message}")
+                            Log.e(TAG, "========================================")
+                            e.printStackTrace()
+                            pendingVPNPromise?.reject("VPN_START_ERROR", e.message, e)
+                        }
                     }
                 }
             } else {
@@ -582,8 +589,8 @@ class VPNModule(reactContext: ReactApplicationContext) :
         intent.putExtra("serverIP", proxyIP)
         intent.putExtra("port", profile.getInt("port"))
         intent.putExtra("type", profile.optString("type", "socks5"))
-        intent.putExtra("username", profile.optString("username", ""))
-        intent.putExtra("password", profile.optString("password", ""))
+        intent.putExtra("username", profile.optString("username", "").trim())
+        intent.putExtra("password", profile.optString("password", "").trim())
         intent.putExtra("dns1", profile.optString("dns1", "1.1.1.1"))
         intent.putExtra("dns2", profile.optString("dns2", "8.8.8.8"))
 
@@ -696,32 +703,65 @@ class VPNModule(reactContext: ReactApplicationContext) :
     @ReactMethod
     fun openVPNSettings(promise: Promise) {
         try {
-            // Open VPN app settings page directly (where user can enable always-on for this app)
-            val intent = android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
-            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            
-            // Try to open the specific VPN profile settings for this app
-            // On Android 7+, we can use ACTION_VPN_SETTINGS which shows VPN apps list
-            // User can then tap on our app to configure always-on
             val packageName = reactApplicationContext.packageName
             Log.d(TAG, "📱 Opening VPN settings for package: $packageName")
             
-            // For Android 8+, try to open app-specific VPN settings
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            // On Android 7+ try different approaches to open VPN profile settings
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                
+                // Option 1: Try Samsung-specific VPN settings (works on Samsung devices)
                 try {
-                    // This opens the VPN settings and highlights VPN apps
-                    val vpnIntent = android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
-                    vpnIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    reactApplicationContext.startActivity(vpnIntent)
+                    val samsungIntent = android.content.Intent()
+                    samsungIntent.setClassName(
+                        "com.android.settings",
+                        "com.android.settings.Settings\$VpnSettingsActivity"
+                    )
+                    samsungIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    reactApplicationContext.startActivity(samsungIntent)
+                    Log.d(TAG, "✅ Opened VPN settings via VpnSettingsActivity")
                     promise.resolve(true)
                     return
                 } catch (e: Exception) {
-                    Log.w(TAG, "⚠️ Could not open VPN settings: ${e.message}")
+                    Log.w(TAG, "⚠️ VpnSettingsActivity not available: ${e.message}")
+                }
+                
+                // Option 2: Try AOSP VPN settings component
+                try {
+                    val aospIntent = android.content.Intent()
+                    aospIntent.setClassName(
+                        "com.android.settings",
+                        "com.android.settings.vpn2.VpnSettings"
+                    )
+                    aospIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    reactApplicationContext.startActivity(aospIntent)
+                    Log.d(TAG, "✅ Opened VPN settings via VpnSettings")
+                    promise.resolve(true)
+                    return
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ VpnSettings not available: ${e.message}")
+                }
+                
+                // Option 3: Try to open the VPN app profile settings directly through content URI
+                try {
+                    val vpnProfileIntent = android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
+                    vpnProfileIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    // Add data to try to select our app
+                    vpnProfileIntent.putExtra(":settings:fragment_args_key", packageName)
+                    vpnProfileIntent.putExtra("package", packageName)
+                    reactApplicationContext.startActivity(vpnProfileIntent)
+                    Log.d(TAG, "✅ Opened VPN settings with package extra")
+                    promise.resolve(true)
+                    return
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ Could not open with package extra: ${e.message}")
                 }
             }
             
-            // Fallback: open general VPN settings
-            reactApplicationContext.startActivity(intent)
+            // Final fallback: Standard ACTION_VPN_SETTINGS
+            val vpnIntent = android.content.Intent(android.provider.Settings.ACTION_VPN_SETTINGS)
+            vpnIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            reactApplicationContext.startActivity(vpnIntent)
+            Log.d(TAG, "✅ Opened general VPN settings")
             promise.resolve(true)
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error opening VPN settings: ${e.message}", e)
@@ -777,5 +817,277 @@ class VPNModule(reactContext: ReactApplicationContext) :
         val prefs = reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
         val profilesStr = prefs.getString("profiles", "[]")
         return JSONArray(profilesStr ?: "[]")
+    }
+
+    @ReactMethod
+fun checkProxyHealth(
+    type: String,
+    host: String,
+    port: Int,
+    username: String,
+    password: String,
+    promise: Promise
+) {
+    // Run in background thread to avoid blocking UI
+    Thread {
+        try {
+            Log.d("HealthCheck", "🏥 Starting health check for $type proxy $host:$port")
+            val start = System.nanoTime()
+            val socket = java.net.Socket()
+            
+            // Set timeouts for health check (5 seconds)
+            socket.soTimeout = 5_000
+            
+            val isHttp = type.equals("http", ignoreCase = true)
+            
+            // Choose handler based on type
+            // For HTTP: connectHttpQuick sends GET request directly through proxy
+            // For SOCKS5: connectSocks5Quick establishes tunnel, then we send GET request
+            val connected = if (isHttp) {
+                connectHttpQuick(socket, host, port, 
+                    if (username.isBlank()) null else username.trim(), 
+                    if (password.isBlank()) null else password.trim())
+            } else {
+                connectSocks5Quick(socket, host, port, 
+                    if (username.isBlank()) null else username.trim(), 
+                    if (password.isBlank()) null else password.trim())
+            }
+            
+            if (!connected) {
+                try { socket.close() } catch (_: Exception) {}
+                val latencyMs = ((System.nanoTime() - start) / 1_000_000L).toInt()
+                Log.e("HealthCheck", "❌ Proxy handshake failed")
+                val result = Arguments.createMap()
+                result.putBoolean("ok", false)
+                result.putInt("latencyMs", latencyMs)
+                result.putString("error", "Proxy handshake failed")
+                promise.resolve(result)
+                return@Thread
+            }
+            
+            Log.d("HealthCheck", "✅ Connected to proxy, reading response...")
+
+            val input = socket.getInputStream()
+            val output = socket.getOutputStream()
+            
+            // For SOCKS5, we need to send HTTP request through the tunnel
+            // For HTTP proxy, the request was already sent in connectHttpQuick
+            if (!isHttp) {
+                val httpRequest = "GET /json HTTP/1.1\r\n" +
+                        "Host: ip-api.com\r\n" +
+                        "Connection: close\r\n" +
+                        "User-Agent: ProxyHealthCheck/1.0\r\n" +
+                        "\r\n"
+                
+                output.write(httpRequest.toByteArray())
+                output.flush()
+                Log.d("HealthCheck", "📤 Sent HTTP request through SOCKS5 tunnel")
+            }
+            
+            // Read response with timeout - give more time
+            socket.soTimeout = 5_000
+            val response = StringBuilder()
+            val buffer = ByteArray(2048)
+            var bytesRead: Int
+            var totalRead = 0
+            
+            try {
+                // Keep reading until we get enough data or timeout
+                while (totalRead < 500) {
+                    bytesRead = input.read(buffer)
+                    if (bytesRead == -1) break
+                    response.append(String(buffer, 0, bytesRead))
+                    totalRead += bytesRead
+                    Log.d("HealthCheck", "📥 Read $bytesRead bytes (total: $totalRead)")
+                    // Check if we have complete response (headers + body)
+                    if (response.contains("\r\n\r\n") && response.length > 50) break
+                }
+            } catch (e: java.net.SocketTimeoutException) {
+                Log.w("HealthCheck", "⏱️ Socket timeout after reading $totalRead bytes")
+                // Timeout is OK if we already have data
+            }
+            
+            socket.close()
+            
+            val latencyMs = ((System.nanoTime() - start) / 1_000_000L).toInt()
+            val responseStr = response.toString()
+            
+            Log.d("HealthCheck", "📋 Full response ($latencyMs ms):\n${responseStr.take(300)}")
+            
+            // Parse response - check for HTTP 200 and extract IP
+            val result = Arguments.createMap()
+            if (responseStr.contains("200 OK") || responseStr.contains("HTTP/1.1 200") || responseStr.contains("HTTP/1.0 200")) {
+                // Try to extract IP from response body
+                val bodyStart = responseStr.indexOf("\r\n\r\n")
+                var ip = ""
+                if (bodyStart != -1) {
+                    val body = responseStr.substring(bodyStart + 4).trim()
+                    // Try to find IP in body using regex
+                    val ipRegex = Regex("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}")
+                    ip = ipRegex.find(body)?.value ?: ""
+                }
+                
+                Log.d("HealthCheck", "🌐 Extracted IP: '$ip'")
+                
+                // Proxy is healthy if we got HTTP 200 - IP extraction is optional
+                result.putBoolean("ok", true)
+                result.putInt("latencyMs", latencyMs)
+                if (ip.isNotEmpty()) {
+                    result.putString("ip", ip)
+                }
+                Log.d("HealthCheck", "✅ Health check PASSED" + if (ip.isNotEmpty()) ": $ip" else " (no IP extracted)")
+            } else {
+                result.putBoolean("ok", false)
+                result.putInt("latencyMs", latencyMs)
+                result.putString("error", "HTTP request failed: ${responseStr.take(100)}")
+                Log.e("HealthCheck", "❌ HTTP request failed, response: ${responseStr.take(200)}")
+            }
+            
+            promise.resolve(result)
+        } catch (e: Exception) {
+            Log.e("HealthCheck", "❌ Exception: ${e.message}", e)
+            val result = Arguments.createMap()
+            result.putBoolean("ok", false)
+            result.putInt("latencyMs", 0)
+            result.putString("error", e.message ?: "Unknown error")
+            promise.resolve(result)
+        }
+    }.start()
+}
+
+// Quick SOCKS5 connect with 3s timeout for health checks
+private fun connectSocks5Quick(socket: java.net.Socket, host: String, port: Int, username: String?, password: String?): Boolean {
+    try {
+        socket.connect(java.net.InetSocketAddress(host, port), 3_000)
+        if (!socket.isConnected) return false
+        
+        val input = socket.getInputStream()
+        val output = socket.getOutputStream()
+        
+        // Auth negotiation
+        if (!username.isNullOrEmpty() && !password.isNullOrEmpty()) {
+            output.write(byteArrayOf(0x05, 0x02, 0x00, 0x02))
+        } else {
+            output.write(byteArrayOf(0x05, 0x01, 0x00))
+        }
+        output.flush()
+        
+        val authResponse = ByteArray(2)
+        if (input.read(authResponse) != 2 || authResponse[0] != 0x05.toByte()) return false
+        
+        // Handle auth if needed
+        when (authResponse[1].toInt() and 0xFF) {
+            0x00 -> { /* No auth */ }
+            0x02 -> {
+                if (username.isNullOrEmpty() || password.isNullOrEmpty()) return false
+                val authRequest = mutableListOf<Byte>(0x01, username.length.toByte())
+                authRequest.addAll(username.toByteArray().toList())
+                authRequest.add(password.length.toByte())
+                authRequest.addAll(password.toByteArray().toList())
+                output.write(authRequest.toByteArray())
+                output.flush()
+                val authResult = ByteArray(2)
+                if (input.read(authResult) != 2 || authResult[1] != 0x00.toByte()) return false
+            }
+            else -> return false
+        }
+        
+        // Connect to ip-api.com
+        val targetHost = "ip-api.com"
+        val targetPort = 80
+        val connectRequest = mutableListOf<Byte>(0x05, 0x01, 0x00, 0x03, targetHost.length.toByte())
+        connectRequest.addAll(targetHost.toByteArray().toList())
+        connectRequest.add((targetPort shr 8).toByte())
+        connectRequest.add((targetPort and 0xFF).toByte())
+        output.write(connectRequest.toByteArray())
+        output.flush()
+        
+        // Read response
+        val connectResponse = ByteArray(4)
+        if (input.read(connectResponse) != 4) return false
+        if (connectResponse[0] != 0x05.toByte() || connectResponse[1] != 0x00.toByte()) return false
+        
+        // Skip bind address
+        val addrType = connectResponse[3].toInt() and 0xFF
+        when (addrType) {
+            0x01 -> input.skip(4) // IPv4
+            0x03 -> input.skip((input.read() + 0).toLong()) // Domain
+            0x04 -> input.skip(16) // IPv6
+        }
+        input.skip(2) // Port
+        
+        return true
+    } catch (e: Exception) {
+        return false
+    }
+}
+
+// Quick HTTP proxy check with 3s timeout for health checks
+// For HTTP proxies, we send the full URL in the GET request (not CONNECT tunnel)
+// This matches: curl http://ip-api.com/json --proxy http://host:port
+private fun connectHttpQuick(socket: java.net.Socket, host: String, port: Int, username: String?, password: String?): Boolean {
+    try {
+        socket.connect(java.net.InetSocketAddress(host, port), 3_000)
+        if (!socket.isConnected) return false
+        
+        val output = socket.getOutputStream()
+        
+        // For HTTP proxy, send GET request with FULL URL (absolute URI)
+        // The proxy will forward the request to the target server
+        val request = StringBuilder()
+        request.append("GET http://ip-api.com/json HTTP/1.1\r\n")
+        request.append("Host: ip-api.com\r\n")
+        request.append("User-Agent: ProxyHealthCheck/1.0\r\n")
+        request.append("Connection: close\r\n")
+        
+        if (!username.isNullOrEmpty() && !password.isNullOrEmpty()) {
+            val credentials = "$username:$password"
+            val encoded = android.util.Base64.encodeToString(credentials.toByteArray(), android.util.Base64.NO_WRAP)
+            request.append("Proxy-Authorization: Basic $encoded\r\n")
+        }
+        request.append("\r\n")
+        
+        output.write(request.toString().toByteArray())
+        output.flush()
+        
+        // Don't read response here - that's done in checkProxyHealth
+        // Just return true since connection + request succeeded
+        return true
+    } catch (e: Exception) {
+        return false
+    }
+}
+
+    @ReactMethod
+    fun prepareVPN(promise: Promise) {
+        try {
+            Log.d(TAG, "========================================")
+            Log.d(TAG, "🔐 prepareVPN() - Checking VPN permission")
+            Log.d(TAG, "========================================")
+
+            val prepareIntent = VpnService.prepare(reactApplicationContext)
+            if (prepareIntent != null) {
+                Log.d(TAG, "⚠️ VPN permission not granted, requesting...")
+                
+                pendingVPNPromise = promise
+                pendingProfile = null // No profile, just permission check
+
+                val activity = reactApplicationContext.currentActivity
+                if (activity != null) {
+                    Log.d(TAG, "📱 Starting VPN permission activity...")
+                    activity.startActivityForResult(prepareIntent, VPN_REQUEST_CODE)
+                } else {
+                    Log.e(TAG, "❌ No activity available to request VPN permission")
+                    promise.reject("NO_ACTIVITY", "No activity available")
+                    pendingVPNPromise = null
+                }
+            } else {
+                Log.d(TAG, "✅ VPN permission already granted")
+                promise.resolve(true)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error preparing VPN: ${e.message}", e)
+            promise.reject("VPN_PREPARE_ERROR", e.message, e)
+        }
     }
 }

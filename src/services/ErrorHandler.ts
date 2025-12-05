@@ -42,7 +42,16 @@ export class ErrorHandler {
      * Parse native error to VPNError
      */
     static parseNativeError(error: any): VPNError {
-        const errorMessage = error?.message || error?.toString() || 'Unknown error';
+        let errorMessage = 'Unknown error';
+
+        if (typeof error === 'string') {
+            errorMessage = error;
+        } else if (error instanceof Error) {
+            errorMessage = error.message || error.toString();
+        } else if (typeof error === 'object' && error !== null) {
+            // Try to extract message/error fields
+            errorMessage = error.message || error.error || error.reason || JSON.stringify(error);
+        }
 
         // Try to match error message to error code
         if (errorMessage.includes('permission')) {

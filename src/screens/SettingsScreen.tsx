@@ -36,6 +36,7 @@ import { Ionicons } from "@expo/vector-icons";
 import type { Theme, ThemeMode } from "../types/theme";
 import { VPNModule } from "../native/VPNModule";
 import Constants from "expo-constants";
+import { useOnboardingStore } from "../store/onboardingStore";
 
 interface SettingsScreenProps {
   navigation?: any;
@@ -48,7 +49,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const { theme, colors, themeMode, setThemeMode } = useTheme();
   const modal = useCustomModal();
 
-  // App settings state (you can move these to a settings store later)
   const [autoConnect, setAutoConnect] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [isLoadingAutoConnect, setIsLoadingAutoConnect] = useState(true);
@@ -98,10 +98,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
   // Open system VPN settings
   const openVPNSettings = useCallback(async () => {
+    console.log("🛠️ openVPNSettings called, Platform.OS:", Platform.OS);
     if (Platform.OS === "android") {
       try {
+        console.log("🛠️ Calling VPNModule.openVPNSettings()...");
         // Use native module to open VPN settings
-        await VPNModule.openVPNSettings();
+        const result = await VPNModule.openVPNSettings();
+        console.log("🛠️ VPNModule.openVPNSettings() returned:", result);
       } catch (error) {
         console.error("Failed to open VPN settings:", error);
         // Fallback to general settings
@@ -150,6 +153,22 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       "Cancel"
     );
   }, [modal]);
+
+  // Handle reset onboarding - for testing purposes
+  const { resetOnboarding } = useOnboardingStore();
+  const handleResetOnboarding = useCallback(() => {
+    modal.showConfirm(
+      "Reset Onboarding",
+      "This will show the onboarding screen again on next app restart. Continue?",
+      async () => {
+        await resetOnboarding();
+        modal.showSuccess("Success", "Onboarding has been reset. Please restart the app.");
+      },
+      undefined,
+      "Reset",
+      "Cancel"
+    );
+  }, [modal, resetOnboarding]);
 
   // Render theme mode option - memoized to prevent recreation on each render
   const renderThemeModeOption = useCallback(
@@ -251,26 +270,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             {Platform.OS === "android" && (
               <>
                 <ThemedDivider />
-                <TouchableOpacity onPress={openVPNSettings}>
-                  <ThemedSettingRow
-                    title="System Always-on VPN"
-                    subtitle="Open Android VPN settings to enable always-on"
-                    icon={
-                      <Ionicons
-                        name="settings"
-                        size={24}
-                        color={colors.interactive.primary}
-                      />
-                    }
-                    rightContent={
-                      <Ionicons
-                        name="open-outline"
-                        size={20}
-                        color={colors.text.tertiary}
-                      />
-                    }
-                  />
-                </TouchableOpacity>
+                <ThemedSettingRow
+                  title="System Always-on VPN"
+                  subtitle="Open Android VPN settings to enable always-on"
+                  icon={
+                    <Ionicons
+                      name="settings"
+                      size={24}
+                      color={colors.interactive.primary}
+                    />
+                  }
+                  rightContent={
+                    <Ionicons
+                      name="open-outline"
+                      size={20}
+                      color={colors.text.tertiary}
+                    />
+                  }
+                  onPress={openVPNSettings}
+                />
               </>
             )}
             <ThemedDivider />
@@ -311,6 +329,16 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               }
               showChevron
               onPress={handleClearCache}
+            />
+            <ThemedDivider />
+            <ThemedSettingRow
+              title="Reset Onboarding"
+              subtitle="Show setup screen on next app start"
+              icon={
+                <Ionicons name="refresh" size={24} color={colors.text.secondary} />
+              }
+              showChevron
+              onPress={handleResetOnboarding}
             />
           </ThemedCard>
 

@@ -50,6 +50,7 @@ export const ProfileFormScreen: React.FC<ProfileFormScreenProps> = ({
   const [password, setPassword] = useState(existingProfile?.password || "");
   const [dns1, setDns1] = useState(existingProfile?.dns1 || "1.1.1.1");
   const [dns2, setDns2] = useState(existingProfile?.dns2 || "8.8.8.8");
+  const [tags, setTags] = useState(existingProfile?.tags?.join(", ") || "");
   const [showPassword, setShowPassword] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [quickImport, setQuickImport] = useState("");
@@ -148,6 +149,11 @@ export const ProfileFormScreen: React.FC<ProfileFormScreenProps> = ({
     setIsSaving(true);
 
     try {
+      const tagList = tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t);
+
       const profile: ProxyProfile = {
         id: existingProfile?.id || `profile_${Date.now()}`,
         name: sanitized.name!,
@@ -158,6 +164,7 @@ export const ProfileFormScreen: React.FC<ProfileFormScreenProps> = ({
         password: sanitized.password,
         dns1: sanitized.dns1,
         dns2: sanitized.dns2,
+        tags: tagList,
         createdAt: existingProfile?.createdAt || new Date(),
         updatedAt: new Date(),
       };
@@ -390,6 +397,23 @@ export const ProfileFormScreen: React.FC<ProfileFormScreenProps> = ({
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="numbers-and-punctuation"
+                />
+              </View>
+            </View>
+
+            {/* Tags Section */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Tags</Text>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Tags (comma separated)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={tags}
+                  onChangeText={setTags}
+                  placeholder="usa, fast, premium"
+                  placeholderTextColor={colors.text.tertiary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
                 />
               </View>
             </View>

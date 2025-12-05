@@ -38,6 +38,14 @@ type NativeVPNModuleShape = {
   openVPNSettings(): Promise<boolean>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
+  checkProxyHealth?: (
+    type: string,
+    host: string,
+    port: number,
+    username: string,
+    password: string
+  ) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>;
+  prepareVPN(): Promise<boolean>;
 };
 
 type ProfilesUpdatedPayload = {
@@ -143,9 +151,9 @@ const normalizeStatus = (payload: NativeStatusPayload): VPNStatusInfo => {
 export const VPNModule = {
   getProfiles: async () => {
     try {
-      logger.debug("Getting VPN profiles", "vpn");
+      // Removed verbose log: logger.debug("Getting VPN profiles", "vpn");
       const profiles = await NativeVPNModule.getProfiles();
-      logger.debug("Retrieved VPN profiles", "vpn", { count: profiles.length });
+      // Removed verbose log: logger.debug("Retrieved VPN profiles", "vpn", { count: profiles.length });
       return profiles;
     } catch (error) {
       logger.error("Failed to get VPN profiles", "vpn", error as Error);
@@ -154,9 +162,9 @@ export const VPNModule = {
   },
   getActiveProfileId: async () => {
     try {
-      logger.debug("Getting active profile ID", "vpn");
+      // Removed verbose log: logger.debug("Getting active profile ID", "vpn");
       const profileId = await NativeVPNModule.getActiveProfileId();
-      logger.debug("Retrieved active profile ID", "vpn", { profileId });
+      // Removed verbose log: logger.debug("Retrieved active profile ID", "vpn", { profileId });
       return profileId;
     } catch (error) {
       logger.error("Failed to get active profile ID", "vpn", error as Error);
@@ -309,10 +317,7 @@ export const VPNModule = {
       logger.debug("Getting VPN status", "vpn");
       const payload = await NativeVPNModule.getStatus();
       const status = normalizeStatus(payload ?? {});
-      logger.debug("Retrieved VPN status", "vpn", {
-        state: status.state,
-        isConnected: status.isConnected,
-      });
+      // Removed verbose log to reduce noise: logger.debug("Retrieved VPN status"...)
       return status;
     } catch (error) {
       logger.error("Failed to get VPN status", "vpn", error as Error);
@@ -367,63 +372,75 @@ export const VPNModule = {
       throw error;
     }
   },
+  checkProxyHealth: async (
+    type: string,
+    host: string,
+    port: number,
+    username: string,
+    password: string
+  ): Promise<{ ok: boolean; latencyMs?: number; error?: string } | null> => {
+    try {
+      if (!NativeVPNModule.checkProxyHealth) {
+        return null;
+      }
+      const res = await NativeVPNModule.checkProxyHealth(
+        type,
+        host,
+        port,
+        username,
+        password
+      );
+      return res ?? null;
+    } catch (error) {
+      logger.error("Failed to check proxy health", "vpn", error as Error, {
+        type,
+        host,
+        port,
+      });
+      throw error;
+    }
+  },
+  prepareVPN: async (): Promise<boolean> => {
+    try {
+      logger.debug("Preparing VPN permission", "vpn");
+      const result = await NativeVPNModule.prepareVPN();
+      logger.debug("VPN permission prepared", "vpn", { granted: result });
+      return result;
+    } catch (error) {
+      logger.error("Failed to prepare VPN permission", "vpn", error as Error);
+      throw error;
+    }
+  },
   addStatusChangeListener: (callback: (status: VPNStatusInfo) => void) => {
-    logger.debug("Adding VPN status change listener", "vpn");
+    // Removed verbose log: logger.debug("Adding VPN status change listener", "vpn");
     const subscription = eventEmitter.addListener(
       "statusChanged",
       (payload: NativeStatusPayload) => {
         const status = normalizeStatus(payload ?? {});
-        logger.info("VPN status changed", "vpn", {
-          state: status.state,
-          isConnected: status.isConnected,
-          publicIp: status.stats.publicIp,
-        });
-
-        // Simple log by status
-        if (status.state === "connected") {
-          const connectionTime = new Date().toLocaleString("en-US");
-          logger.info(
-            `Connection successful - Time: ${connectionTime}`,
-            "vpn",
-            {
-              publicIp: status.stats.publicIp,
-            }
-          );
-        } else if (status.state === "connecting") {
-          logger.info("Establishing connection...", "vpn");
-        } else if (status.state === "disconnected") {
-          logger.info("Proxy disconnected", "vpn");
-        } else if (status.state === "error") {
+        if (status.state === "error") {
           logger.error("Connection error", "vpn");
         }
-
+        // Removed all other info/debug logs here
         callback(status);
       }
     );
     return {
       remove: () => {
-        logger.debug("Removing VPN status change listener", "vpn");
+        // Removed verbose log: logger.debug("Removing VPN status change listener", "vpn");
         subscription.remove();
       },
     };
   },
   addErrorListener: (callback: (error: string) => void) => {
     logger.debug("Adding VPN error listener", "vpn");
-    const subscription = eventEmitter.addListener(
-      "error",
-      (message: unknown) => {
-        const errorMessage =
-          typeof message === "string"
-            ? message
-            : String(message ?? "Unknown VPN error");
-        logger.error(
-          "VPN error event received",
-          "vpn",
-          new Error(errorMessage)
-        );
-        callback(errorMessage);
-      }
-    );
+    const subscription = eventEmitter.addListener("error", (message: any) => {
+      const errorMessage =
+        typeof message === "string"
+          ? message
+          : message?.message || JSON.stringify(message);
+      logger.error("VPN error event received", "vpn", new Error(errorMessage));
+      callback(errorMessage);
+    });
     return {
       remove: () => {
         logger.debug("Removing VPN error listener", "vpn");

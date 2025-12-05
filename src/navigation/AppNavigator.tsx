@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
   NavigationContainer,
   DefaultTheme,
@@ -10,14 +10,18 @@ import {
   ProfileListScreen,
   ProfileFormScreen,
   ConnectionScreen,
+  OnboardingScreen,
 } from "../screens";
 import { LogsScreen } from "../screens/LogsScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "../hooks/useTheme";
+import { useOnboardingStore } from "../store/onboardingStore";
+import { View, ActivityIndicator, StyleSheet } from "react-native";
 
 export type RootStackParamList = {
+  Onboarding: undefined;
   MainTabs: undefined;
   ProfileForm: { profile?: any } | undefined;
 };
@@ -116,8 +120,28 @@ const MainTabs: React.FC = () => {
   );
 };
 
+// Wrapper component for OnboardingScreen to handle navigation
+const OnboardingWrapper: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { completeOnboarding } = useOnboardingStore();
+
+  const handleComplete = async () => {
+    await completeOnboarding();
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "MainTabs" }],
+    });
+  };
+
+  return <OnboardingScreen navigation={navigation} onComplete={handleComplete} />;
+};
+
 export const AppNavigator: React.FC = () => {
   const { colors, isDark } = useTheme();
+  const { hasCompletedOnboarding, isLoading, loadOnboardingStatus } = useOnboardingStore();
+
+  useEffect(() => {
+    loadOnboardingStatus();
+  }, []);
 
   // Create custom navigation theme based on current theme
   const navigationTheme = {
@@ -133,6 +157,15 @@ export const AppNavigator: React.FC = () => {
     fonts: DefaultTheme.fonts,
   };
 
+  // Show loading screen while checking onboarding status
+  if (isLoading) {
+    return (
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background.primary }]}>
+        <ActivityIndicator size="large" color={colors.interactive.primary} />
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer theme={navigationTheme}>
       <Stack.Navigator
@@ -145,7 +178,15 @@ export const AppNavigator: React.FC = () => {
             fontWeight: "bold",
           },
         }}
+        initialRouteName={hasCompletedOnboarding ? "MainTabs" : "Onboarding"}
       >
+        <Stack.Screen
+          name="Onboarding"
+          component={OnboardingWrapper}
+          options={{
+            headerShown: false,
+          }}
+        />
         <Stack.Screen
           name="MainTabs"
           component={MainTabs}
@@ -164,3 +205,11 @@ export const AppNavigator: React.FC = () => {
     </NavigationContainer>
   );
 };
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+});

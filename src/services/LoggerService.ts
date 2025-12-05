@@ -25,9 +25,10 @@ import type {
  */
 const DEFAULT_CONFIG: LoggerConfig = {
   enabled: true,
-  levels: ["debug", "info", "warn", "error", "critical"],
-  maxEntries: 1000,
-  maxStorageEntries: 5000,
+  // Removed "debug" and "info" to reduce noise for user and terminal
+  levels: ["warn", "error", "critical"],
+  maxEntries: 200, // Reduced from 1000
+  maxStorageEntries: 1000, // Reduced from 5000
   persistLogs: true,
   consoleOutput: __DEV__, // Only in development
 };
@@ -180,6 +181,13 @@ class LoggerService {
       .filter((h) => h.enabled)
       .map((h) => {
         try {
+          // Skip console handler for filtered levels if console output is reduced
+          if (
+            h.name === "console" &&
+            !this.config.levels.includes(entry.level)
+          ) {
+            return Promise.resolve();
+          }
           return h.handle(entry);
         } catch (error) {
           console.error(`Handler ${h.name} failed:`, error);

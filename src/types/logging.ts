@@ -18,8 +18,10 @@ export type LogCategory =
   | "vpn" // VPN connection events
   | "network" // Network operations
   | "storage" // Storage operations
+  | "database" // Database operations
   | "ui" // UI interactions
   | "native" // Native module events
+  | "proxySource" // Proxy source operations
   | "error"; // Error events
 
 /**

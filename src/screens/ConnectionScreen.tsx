@@ -421,15 +421,25 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
       );
       console.log("✅ VPN started successfully");
     } catch (error: any) {
-      console.error("❌ VPN start error:", error);
-      setError(error.message || "Failed to start VPN");
+      let errorMsg = "Unknown error";
+      if (typeof error === "string") {
+        errorMsg = error;
+      } else if (error instanceof Error) {
+        errorMsg = error.message || error.toString();
+      } else if (typeof error === "object") {
+        errorMsg = error?.message || JSON.stringify(error);
+      } else {
+        errorMsg = String(error);
+      }
+      console.error("❌ VPN start error:", errorMsg);
+      setError(errorMsg);
       setVPNStatus("disconnected");
       setIsConnectingLocal(false);
 
       let errorMessage =
-        error.message || "Failed to start VPN. Please try again.";
+        error?.message || "Failed to start VPN. Please try again.";
 
-      if (error.code === "VPN_PERMISSION_DENIED") {
+      if (error?.code === "VPN_PERMISSION_DENIED") {
         errorMessage =
           "VPN permission was denied. Please grant permission to use VPN.";
       } else if (error.code === "NO_ACTIVITY") {
