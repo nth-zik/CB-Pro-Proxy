@@ -1,0 +1,206 @@
+name: Build iOS Simulator
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build-simulator:
+    runs-on: macos-14  # macOS 14 with Xcode 15.4
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.4'
+
+      - name: Prebuild for iOS
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: Build for iOS Simulator
+        run: |
+          cd ios
+
+          # Build for simulator (no code signing required)
+          xcodebuild \
+            -workspace CBVVPN.xcworkspace \
+            -scheme CBVVPN \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -derivedDataPath ./build \
+            clean build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+          echo "✅ Simulator build completed successfully"
+
+      - name: Locate .app bundle
+        id: locate_app
+        run: |
+          cd ios
+          APP_PATH=$(find build/Build/Products/Debug-iphonesimulator -name "*.app" -type d | head -n 1)
+          echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
+          echo "Found .app at: $APP_PATH"
+
+      - name: Create simulator archive
+        run: |
+          cd ios
+          APP_NAME="CBVVPN-Simulator"
+
+          # Create archive directory
+          mkdir -p simulator-archive
+
+          # Copy .app bundle
+          cp -R "${{ steps.locate_app.outputs.app_path }}" simulator-archive/
+
+          # Create info file
+          cat > simulator-archive/README.txt << 'EOF'
+          CB Pro Proxy - iOS Simulator Build
+          ====================================
+
+          This is a simulator build for testing purposes.
+
+          Installation:
+          1. Open Xcode
+          2. Window → Devices and Simulators
+          3. Select a simulator
+          4. Drag and drop CBVVPN.app onto the simulator
+
+          Or use command line:
+          xcrun simctl install booted CBVVPN.app
+
+          Running:
+          xcrun simctl launch booted com.cbv.vpn
+
+          Note: This build works ONLY on iOS Simulator, not on physical devices.
+          EOF
+
+          # Create zip archive
+          cd simulator-archive
+          zip -r "../${APP_NAME}.zip" .
+          cd ..
+
+          echo "✅ Created simulator archive: ${APP_NAME}.zip"
+
+      - name: Upload Simulator Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: CBVVPN-Simulator-${{ github.sha }}
+          path: ios/CBVVPN-Simulator.zip
+          retention-days: 30
+
+      - name: Run Unit Tests (Optional)
+        continue-on-error: true
+        run: |
+          cd ios
+
+          # Run tests on simulator
+          xcodebuild test \
+            -workspace CBVVPN.xcworkspace \
+            -scheme CBVVPN \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -derivedDataPath ./build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+          echo "✅ Tests completed"
+
+      - name: Build Summary
+        run: |
+          echo "📦 iOS Simulator Build Summary"
+          echo "=============================="
+          echo "Platform: iOS Simulator (Debug)"
+          echo "Architecture: x86_64, arm64 (Apple Silicon compatible)"
+          echo "Code Signing: None (simulator only)"
+          echo "Artifact: CBVVPN-Simulator.zip"
+          echo ""
+          echo "✅ Build completed successfully!"
+          echo ""
+          echo "To install on simulator:"
+          echo "  1. Download artifact from Actions"
+          echo "  2. Unzip the archive"
+          echo "  3. xcrun simctl install booted CBVVPN.app"
+          echo "  4. xcrun simctl launch booted com.cbv.vpn"
+
+  # Optional: Build for multiple simulator versions
+  build-multi-simulator:
+    runs-on: macos-14
+    if: github.event_name == 'workflow_dispatch'  # Only on manual trigger
+
+    strategy:
+      matrix:
+        simulator:
+          - name: 'iPhone 15'
+            os: 'latest'
+          - name: 'iPhone 14'
+            os: '17.2'
+          - name: 'iPad Pro (12.9-inch)'
+            os: 'latest'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prebuild for iOS
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: Build for ${{ matrix.simulator.name }}
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace CBVVPN.xcworkspace \
+            -scheme CBVVPN \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=${{ matrix.simulator.name }},OS=${{ matrix.simulator.os }}' \
+            -derivedDataPath ./build \
+            clean build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: CBVVPN-${{ matrix.simulator.name }}-Simulator
+          path: ios/build/Build/Products/Debug-iphonesimulator/CBVVPN.app
