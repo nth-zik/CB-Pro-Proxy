@@ -708,14 +708,25 @@ class VPNConnectionService : VpnService() {
                                 broadcastStatus(STATUS_CONNECTED, force = false, publicIpOverride = fetchedIp)
                             }
                         } else {
-                            Log.w(TAG, "⚠️ Unable to determine public IP via proxy")
-                            // Proxy might be having issues
-                            onProxyError("Failed to fetch public IP - proxy may be unreachable")
-                            
-                            // Don't clear existing IP if check fails, just log it
-                            if (publicIp == null && !isProxyError) {
-                                updateNotification("Connected to $proxyServer")
-                                broadcastStatus(STATUS_CONNECTED, force = true)
+                            Log.w(TAG, "⚠️ Unable to determine public IP via proxy, checking DNS connectivity...")
+
+                            // Fallback: Check if we can reach Google DNS (8.8.8.8:53)
+                            if (checkProxyConnectivity()) {
+                                Log.d(TAG, "✅ DNS check passed, proxy is alive despite IP fetch failure")
+                                
+                                // Proxy is working - clear error state if any
+                                onProxyRecovered()
+                                
+                                // Maintain "Connected" status. 
+                                // If we have an old IP, we keep it. If not, we just show connected.
+                                if (publicIp == null) {
+                                    updateNotification("Connected to $proxyServer")
+                                }
+                                broadcastStatus(STATUS_CONNECTED, force = false)
+                            } else {
+                                Log.e(TAG, "❌ DNS check failed, proxy is likely dead")
+                                // Only report error if BOTH checks fail
+                                onProxyError("Failed to fetch public IP and DNS check failed")
                             }
                         }
                     } catch (e: Exception) {
@@ -933,6 +944,52 @@ class VPNConnectionService : VpnService() {
         } finally {
             try {
                 sslSocket?.close()
+                socket?.close()
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+    }
+
+    private fun checkProxyConnectivity(): Boolean {
+        var socket: java.net.Socket? = null
+        try {
+            Log.d(TAG, "🔍 Checking proxy connectivity via DNS (8.8.8.8:53)...")
+            
+            socket = java.net.Socket()
+            socket.soTimeout = 5000 // 5s timeout for connectivity check
+            socket.tcpNoDelay = true
+            
+            if (!protect(socket)) {
+                Log.w(TAG, "⚠️ Failed to protect check socket")
+            }
+
+            val proxyHandler =
+                    if (proxyType.lowercase() in listOf("socks5", "socks")) {
+                        SOCKS5ProxyHandler(
+                                proxyServerIP,
+                                proxyPort,
+                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
+                                if (proxyPassword.isNotEmpty()) proxyPassword else null
+                        )
+                    } else {
+                        HTTPProxyHandler(
+                                proxyServerIP,
+                                proxyPort,
+                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
+                                if (proxyPassword.isNotEmpty()) proxyPassword else null
+                        )
+                    }
+
+            // Attempt to connect to Google DNS (8.8.8.8) on port 53 (TCP)
+            // If proxy can establish a tunnel, it's alive.
+            val connected = proxyHandler.connect("8.8.8.8", 53, socket)
+            return connected
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Proxy connectivity check failed: ${e.message}")
+            return false
+        } finally {
+            try {
                 socket?.close()
             } catch (e: Exception) {
                 // Ignore

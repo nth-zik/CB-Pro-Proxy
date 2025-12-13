@@ -13,6 +13,10 @@ on:
         description: 'Optional version to use (e.g. 1.2.3). If provided, this overrides tag-based version.'
         required: false
         default: ''
+      release_notes:
+        description: 'Release notes to include in the GitHub Release'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -24,6 +28,43 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Release Notes from Commit History
+        id: release_notes
+        run: |
+          echo "Recent tags:"
+          git tag --sort=-v:refname | head -n 5
+          
+          if [[ "${{ github.ref }}" == "refs/tags/"* ]]; then
+            CURRENT_REF="${{ github.ref_name }}"
+            # Find the previous tag relative to the current tag
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_REF}^" 2>/dev/null || echo "")
+          else
+            CURRENT_REF="HEAD"
+            # Find the latest tag reachable from HEAD
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          fi
+
+          echo "Generating notes from '$PREVIOUS_TAG' to '$CURRENT_REF'"
+          
+          if [[ -z "$PREVIOUS_TAG" ]]; then
+            echo "No previous tag found. Getting last 20 commits."
+            COMMITS=$(git log -n 20 --pretty=format:"- %s (%h)" "$CURRENT_REF")
+          else
+            COMMITS=$(git log "$PREVIOUS_TAG..$CURRENT_REF" --pretty=format:"- %s (%h)")
+          fi
+
+          # Filter out merge commits if desired, or keep them. 
+          # Here we keep them but maybe format them nicely? 
+          # Let's just use the raw log for now as requested.
+          
+          # Multiline output to GITHUB_OUTPUT
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "LOG<<$EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "$EOF" >> $GITHUB_OUTPUT
 
       - name: Determine version
         id: version
@@ -39,6 +80,8 @@ jobs:
             VERSION=1.0.0
             echo "Using default version: $VERSION"
           fi
+          # Strip 'v' prefix if user typed it manually
+          VERSION=${VERSION#v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Node.js
@@ -97,11 +140,17 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v1
         with:
           files: android/app/build/outputs/apk/release/app-release.apk
-          tag_name: ${{ github.ref_name }}
-          body: "Android APK Release - Version ${{ steps.version.outputs.version }}"
+          tag_name: v${{ steps.version.outputs.version }}
+          body: |
+            Android APK Release - Version ${{ steps.version.outputs.version }}
+            
+            ${{ github.event.inputs.release_notes }}
+            
+            ## Change Log
+            ${{ steps.release_notes.outputs.LOG }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
