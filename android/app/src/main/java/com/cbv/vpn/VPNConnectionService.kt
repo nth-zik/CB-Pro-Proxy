@@ -29,7 +29,7 @@ class VPNConnectionService : VpnService() {
     private val TAG = "VPNConnectionService"
     private val NOTIFICATION_ID = 1
     private val CHANNEL_ID = "VPN_SERVICE_CHANNEL"
-    private val CHANNEL_ERROR_ID = "VPN_ERROR_CHANNEL"
+    private val CHANNEL_ERROR_ID = "VPN_ERROR_CHANNEL_SILENT"
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnThread: Thread? = null
@@ -1006,14 +1006,14 @@ class VPNConnectionService : VpnService() {
                     )
             manager?.createNotificationChannel(serviceChannel)
             
-            // Error channel (High importance for alerts)
+            // Error channel (Now Silent/Low importance as requested)
             val errorChannel =
                     NotificationChannel(
                             CHANNEL_ERROR_ID,
-                            "VPN Alerts",
-                            NotificationManager.IMPORTANCE_HIGH
+                            "VPN Alerts (Silent)",
+                            NotificationManager.IMPORTANCE_LOW
                     )
-            errorChannel.enableVibration(true)
+            errorChannel.enableVibration(false)
             errorChannel.lightColor = Color.RED
             manager?.createNotificationChannel(errorChannel)
         }
@@ -1063,9 +1063,9 @@ class VPNConnectionService : VpnService() {
                         .setContentIntent(pendingIntent)
                         .setOngoing(true)
 
-        // Add priority for error status to make it more visible
+        // Add priority for error status to make it more visible but silent
         if (isProxyErrorStatus) {
-            builder.setPriority(NotificationCompat.PRIORITY_HIGH)
+            builder.setPriority(NotificationCompat.PRIORITY_LOW)
             builder.setColor(Color.RED)
         }
 
