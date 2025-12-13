@@ -98,8 +98,18 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
       result = result.filter((p) => p.tags?.includes(selectedTag));
     }
 
+    // Sort active profile to top
+    if (activeProfileId) {
+      // Create a copy to avoid mutating state
+      result = [...result].sort((a, b) => {
+        if (a.id === activeProfileId) return -1;
+        if (b.id === activeProfileId) return 1;
+        return 0;
+      });
+    }
+
     return result;
-  }, [profiles, query, selectedTag]);
+  }, [profiles, query, selectedTag, activeProfileId]);
 
   useEffect(() => {
     loadProfiles();

@@ -1,0 +1,19 @@
+CB Pro VPN is a powerful and user-friendly VPN application designed to provide secure, fast, and reliable internet access with advanced SOCKS5 proxy support.
+
+Key Features:
+• Multiple VPN profiles - Save and manage multiple VPN configurations
+• SOCKS5 Proxy Support - Direct SOCKS5 connection capability
+• Fast & Secure - Encrypted connections for your privacy
+• Easy Profile Management - Import/export profiles for quick setup
+• Health Checks - Monitor connection status in real-time
+• Dark/Light Theme - Customizable interface
+• Detailed Logs - Track connection history and troubleshoot issues
+
+Whether you're protecting your privacy, accessing restricted content, or managing multiple proxy configurations, CB Pro VPN provides the tools you need.
+
+Privacy & Security:
+We take your privacy seriously. CB Pro VPN does not log your activity or collect personal information.
+
+Requirements:
+- Android 10 (API 29) or higher
+- Internet permission for VPN functionality

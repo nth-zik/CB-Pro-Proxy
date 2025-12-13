@@ -1,0 +1,4 @@
+• Updated to version 1.0.0
+• Added screenshot capture automation
+• Improved connection stability
+• Bug fixes and performance improvements

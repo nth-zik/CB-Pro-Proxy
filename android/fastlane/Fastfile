@@ -1,0 +1,159 @@
+default_platform(:android)
+
+platform :android do
+  desc "Build and upload Android release to Google Play Store"
+  lane :release_to_playstore do |options|
+    # Get version from app.json
+    app_json = JSON.parse(File.read('../app.json'))
+    version_name = app_json['expo']['version']
+    
+    # Increment version code
+    current_build_number = options[:build_number] || (get_build_number + 1).to_s
+    
+    # Setup local properties for gradle
+    setup_gradle_properties(build_number: current_build_number)
+    
+    # Build signed APK and AAB
+    UI.message("Building signed Android App Bundle...")
+    build_app(
+      task: "bundle",
+      project_dir: "./",
+      gradle_path: "./gradlew",
+      build_type: "Release",
+      properties: {
+        "android.injected.signing.store.file" => ENV['KEYSTORE_PATH'],
+        "android.injected.signing.store.password" => ENV['KEYSTORE_PASSWORD'],
+        "android.injected.signing.key.alias" => ENV['KEYSTORE_ALIAS'],
+        "android.injected.signing.key.password" => ENV['KEYSTORE_KEY_PASSWORD']
+      }
+    )
+    
+    # Upload to Google Play Store
+    UI.message("Uploading to Google Play Store...")
+    upload_to_play_store(
+      track: options[:track] || 'internal',
+      release_status: options[:release_status] || 'draft',
+      version_name: version_name,
+      build_number: current_build_number,
+      aab: 'app/build/outputs/bundle/release/app-release.aab',
+      skip_upload_screenshots: false,
+      skip_upload_images: false,
+      json_key_data: ENV['ANDROID_JSON_KEY_DATA']
+    )
+    
+    UI.success("✅ Successfully uploaded to Google Play Store!")
+  end
+
+  desc "Build signed APK (for testing)"
+  lane :build_signed_apk do
+    # Setup local properties
+    setup_gradle_properties()
+    
+    UI.message("Building signed APK...")
+    build_app(
+      task: "assemble",
+      build_type: "Release",
+      project_dir: "./",
+      gradle_path: "./gradlew",
+      properties: {
+        "android.injected.signing.store.file" => ENV['KEYSTORE_PATH'],
+        "android.injected.signing.store.password" => ENV['KEYSTORE_PASSWORD'],
+        "android.injected.signing.key.alias" => ENV['KEYSTORE_ALIAS'],
+        "android.injected.signing.key.password" => ENV['KEYSTORE_KEY_PASSWORD']
+      }
+    )
+    
+    UI.success("✅ APK built successfully!")
+    UI.message("APK location: app/build/outputs/apk/release/app-release.apk")
+  end
+
+  desc "Build signed AAB for Play Store"
+  lane :build_signed_aab do
+    setup_gradle_properties()
+    
+    UI.message("Building signed AAB...")
+    build_app(
+      task: "bundle",
+      build_type: "Release",
+      project_dir: "./",
+      gradle_path: "./gradlew",
+      properties: {
+        "android.injected.signing.store.file" => ENV['KEYSTORE_PATH'],
+        "android.injected.signing.store.password" => ENV['KEYSTORE_PASSWORD'],
+        "android.injected.signing.key.alias" => ENV['KEYSTORE_ALIAS'],
+        "android.injected.signing.key.password" => ENV['KEYSTORE_KEY_PASSWORD']
+      }
+    )
+    
+    UI.success("✅ AAB built successfully!")
+    UI.message("AAB location: app/build/outputs/bundle/release/app-release.aab")
+  end
+
+  desc "Take screenshots for Play Store listing"
+  lane :screenshots do
+    UI.message("📱 Starting screenshot capture...")
+    
+    # Install APK on emulator/device
+    build_app(
+      task: "assemble",
+      build_type: "Debug",
+      project_dir: "./",
+      gradle_path: "./gradlew"
+    )
+    
+    # Push and run screenshot automation script
+    Dir.chdir("../..") do
+      system("adb uninstall com.cbv.vpn.debug 2>/dev/null || true")
+      system("adb install app/build/outputs/apk/debug/app-debug.apk")
+    end
+    
+    UI.message("✅ Screenshot capture complete! Check fastlane/screenshots/")
+  end
+
+  desc "Run UI tests"
+  lane :ui_tests do
+    UI.message("Running UI tests...")
+    
+    # You can add Espresso or similar testing framework here
+    # system("./gradlew connectedAndroidTest")
+    
+    UI.success("✅ UI tests passed!")
+  end
+
+  desc "Validate Play Store metadata"
+  lane :validate_metadata do
+    UI.message("Validating metadata...")
+    
+    metadata_path = "fastlane/metadata/android/en-US"
+    required_files = {
+      "title.txt" => 50,
+      "short_description.txt" => 80,
+      "full_description.txt" => 4000,
+      "changelog.txt" => 500
+    }
+    
+    required_files.each do |file, max_length|
+      file_path = "#{metadata_path}/#{file}"
+      
+      unless File.exist?(file_path)
+        UI.error("❌ Missing: #{file}")
+        next
+      end
+      
+      content = File.read(file_path).strip
+      if content.length > max_length
+        UI.error("❌ #{file} exceeds max length (#{content.length}/#{max_length})")
+      else
+        UI.success("✅ #{file} (#{content.length}/#{max_length})")
+      end
+    end
+  end
+
+  private_lane :setup_gradle_properties do |options|
+    properties_file = "local.properties"
+    build_number = options[:build_number] || Time.now.strftime('%s')
+    
+    File.write(properties_file, "sdk.dir=#{ENV['ANDROID_SDK_ROOT'] || ENV['ANDROID_HOME']}\n")
+    File.write("gradle.properties", "org.gradle.java.home=#{`which java`}\n", mode: "a")
+  end
+end

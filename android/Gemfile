@@ -1,0 +1,6 @@
+# Fastlane Configuration for Screenshots
+
+source "https://rubygems.org"
+
+gem "fastlane", "~> 2.219"
+gem "fastlane-plugin-gradle", "~> 1.0"

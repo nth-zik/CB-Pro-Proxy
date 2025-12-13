@@ -16,6 +16,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import android.graphics.Color
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import javax.net.ssl.SSLSocket
@@ -28,6 +29,7 @@ class VPNConnectionService : VpnService() {
     private val TAG = "VPNConnectionService"
     private val NOTIFICATION_ID = 1
     private val CHANNEL_ID = "VPN_SERVICE_CHANNEL"
+    private val CHANNEL_ERROR_ID = "VPN_ERROR_CHANNEL"
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnThread: Thread? = null
@@ -58,11 +60,11 @@ class VPNConnectionService : VpnService() {
     private var isProxyError = false
     private var proxyErrorMessage: String? = null
     private var consecutiveProxyFailures = 0
-    private val MAX_CONSECUTIVE_FAILURES = 3
+    private val MAX_CONSECUTIVE_FAILURES = 1
 
     // Public IP check mechanism
     private var publicIpCheckThread: Thread? = null
-    private val PUBLIC_IP_CHECK_INTERVAL_MS = 15000L // Check every 15 seconds
+    private val PUBLIC_IP_CHECK_INTERVAL_MS = 30000L // Check every 30 seconds
 
     private val bytesReceivedReceiver =
             object : android.content.BroadcastReceiver() {
@@ -945,14 +947,27 @@ class VPNConnectionService : VpnService() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel =
+            val manager = getSystemService(NotificationManager::class.java)
+            
+            // Standard service channel (Low importance to minimize distraction)
+            val serviceChannel =
                     NotificationChannel(
                             CHANNEL_ID,
                             "VPN Service",
                             NotificationManager.IMPORTANCE_LOW
                     )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
+            manager?.createNotificationChannel(serviceChannel)
+            
+            // Error channel (High importance for alerts)
+            val errorChannel =
+                    NotificationChannel(
+                            CHANNEL_ERROR_ID,
+                            "VPN Alerts",
+                            NotificationManager.IMPORTANCE_HIGH
+                    )
+            errorChannel.enableVibration(true)
+            errorChannel.lightColor = Color.RED
+            manager?.createNotificationChannel(errorChannel)
         }
     }
 
@@ -990,8 +1005,10 @@ class VPNConnectionService : VpnService() {
             android.R.drawable.ic_lock_lock
         }
 
+        val targetChannelId = if (isProxyErrorStatus) CHANNEL_ERROR_ID else CHANNEL_ID
+        
         val builder =
-                NotificationCompat.Builder(this, CHANNEL_ID)
+                NotificationCompat.Builder(this, targetChannelId)
                         .setContentTitle(if (isProxyErrorStatus) "CBV VPN - Proxy Error" else "CBV VPN")
                         .setContentText(status)
                         .setSmallIcon(iconRes)
@@ -1001,6 +1018,7 @@ class VPNConnectionService : VpnService() {
         // Add priority for error status to make it more visible
         if (isProxyErrorStatus) {
             builder.setPriority(NotificationCompat.PRIORITY_HIGH)
+            builder.setColor(Color.RED)
         }
 
         // Only add stop button when VPN is connected or has proxy error
