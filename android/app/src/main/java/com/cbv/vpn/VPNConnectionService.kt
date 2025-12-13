@@ -60,7 +60,7 @@ class VPNConnectionService : VpnService() {
     private var isProxyError = false
     private var proxyErrorMessage: String? = null
     private var consecutiveProxyFailures = 0
-    private val MAX_CONSECUTIVE_FAILURES = 1
+    private val MAX_CONSECUTIVE_FAILURES = 3
 
     // Public IP check mechanism
     private var publicIpCheckThread: Thread? = null
@@ -954,39 +954,30 @@ class VPNConnectionService : VpnService() {
     private fun checkProxyConnectivity(): Boolean {
         var socket: java.net.Socket? = null
         try {
-            Log.d(TAG, "🔍 Checking proxy connectivity via DNS (8.8.8.8:53)...")
+            // User requested to only report error if we cannot connect to the proxy server itself.
+            // We do not check if the proxy has internet access (tunneling).
+            // Just check if we can establish a TCP connection to the proxy IP/Port.
+            val targetHost = proxyServerIP
+            val targetPort = proxyPort
+            
+            Log.d(TAG, "🔍 Checking proxy server reachability: $targetHost:$targetPort...")
             
             socket = java.net.Socket()
-            socket.soTimeout = 5000 // 5s timeout for connectivity check
+            socket.soTimeout = 5000 // 5s timeout for TCP connect
             socket.tcpNoDelay = true
             
             if (!protect(socket)) {
                 Log.w(TAG, "⚠️ Failed to protect check socket")
             }
 
-            val proxyHandler =
-                    if (proxyType.lowercase() in listOf("socks5", "socks")) {
-                        SOCKS5ProxyHandler(
-                                proxyServerIP,
-                                proxyPort,
-                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
-                                if (proxyPassword.isNotEmpty()) proxyPassword else null
-                        )
-                    } else {
-                        HTTPProxyHandler(
-                                proxyServerIP,
-                                proxyPort,
-                                if (proxyUsername.isNotEmpty()) proxyUsername else null,
-                                if (proxyPassword.isNotEmpty()) proxyPassword else null
-                        )
-                    }
-
-            // Attempt to connect to Google DNS (8.8.8.8) on port 53 (TCP)
-            // If proxy can establish a tunnel, it's alive.
-            val connected = proxyHandler.connect("8.8.8.8", 53, socket)
-            return connected
+            // Direct TCP connection to proxy server
+            // This verifies the server is up and reachable, ignoring whether it can tunnel to the internet
+            socket.connect(java.net.InetSocketAddress(targetHost, targetPort), 5000)
+            
+            Log.d(TAG, "✅ Proxy server TCP connection successful")
+            return true
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Proxy connectivity check failed: ${e.message}")
+            Log.e(TAG, "❌ Proxy server unreachable: ${e.message}")
             return false
         } finally {
             try {
