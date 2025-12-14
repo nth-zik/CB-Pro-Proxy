@@ -46,6 +46,8 @@ type NativeVPNModuleShape = {
     password: string
   ) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>;
   prepareVPN(): Promise<boolean>;
+  setPowerProfile(profile: string): Promise<void>;
+  getPowerProfile(): Promise<string>;
 };
 
 type ProfilesUpdatedPayload = {
@@ -409,6 +411,25 @@ export const VPNModule = {
     } catch (error) {
       logger.error("Failed to prepare VPN permission", "vpn", error as Error);
       throw error;
+    }
+  },
+  setPowerProfile: async (profile: string): Promise<void> => {
+    try {
+      logger.info("Setting power profile", "app", { profile });
+      await NativeVPNModule.setPowerProfile(profile);
+      logger.info("Power profile updated", "app", { profile });
+    } catch (error) {
+      logger.error("Failed to set power profile", "app", error as Error);
+      throw error;
+    }
+  },
+  getPowerProfile: async (): Promise<string> => {
+    try {
+      const profile = await NativeVPNModule.getPowerProfile();
+      return profile || "balanced";
+    } catch (error) {
+      logger.error("Failed to get power profile", "app", error as Error);
+      return "balanced"; // Default fallback
     }
   },
   addStatusChangeListener: (callback: (status: VPNStatusInfo) => void) => {

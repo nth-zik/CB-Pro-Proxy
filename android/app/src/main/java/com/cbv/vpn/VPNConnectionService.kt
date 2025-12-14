@@ -53,8 +53,14 @@ class VPNConnectionService : VpnService() {
     // Health check mechanism for always-on VPN
     private var healthCheckThread: Thread? = null
     private var lastPacketTime: Long = 0L
-    private val HEALTH_CHECK_INTERVAL_MS = 10000L // Check every 10 seconds
-    private val CONNECTION_TIMEOUT_MS = 600000L // Consider dead after 10 minutes (was 30s)
+    
+    // Power profile configuration (loaded from SharedPreferences)
+    private var currentPowerProfile: String = "balanced"
+    private var healthCheckIntervalMs: Long = 60000L
+    private var publicIpCheckIntervalMs: Long = 180000L
+    private var maxSleepMs: Long = 50L
+    private var statusBroadcastPacketInterval: Int = 1000
+    private val CONNECTION_TIMEOUT_MS = 600000L // Consider dead after 10 minutes
 
     // Proxy error tracking
     private var isProxyError = false
@@ -64,7 +70,7 @@ class VPNConnectionService : VpnService() {
 
     // Public IP check mechanism
     private var publicIpCheckThread: Thread? = null
-    private val PUBLIC_IP_CHECK_INTERVAL_MS = 30000L // Check every 30 seconds
+
 
     private val bytesReceivedReceiver =
             object : android.content.BroadcastReceiver() {
@@ -117,6 +123,10 @@ class VPNConnectionService : VpnService() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "VPNConnectionService created")
+        
+        // Load power profile configuration
+        loadPowerProfileConfig()
+        
         createNotificationChannel()
         // Check notification permission on Android 13+
         val notifAllowed =
@@ -213,7 +223,14 @@ class VPNConnectionService : VpnService() {
                 broadcastStatus(currentStatus, force = true)
                 return START_NOT_STICKY
             }
-
+            
+            // Handle power profile update
+            if (action == "update_power_profile") {
+                val newProfile = intent.getStringExtra("power_profile") ?: "balanced"
+                Log.d(TAG, "⚡ Power profile update requested: $newProfile")
+                loadPowerProfileConfig()
+                return START_NOT_STICKY
+            }
             proxyServer = intent.getStringExtra("server") ?: ""
             proxyServerIP = intent.getStringExtra("serverIP") ?: proxyServer
             proxyPort = intent.getIntExtra("port", 0)
@@ -444,19 +461,21 @@ class VPNConnectionService : VpnService() {
                             }
                         }
 
-                        // Broadcast status update every 500 packets (reduced frequency)
-                        if (packetCount % 500 == 0) {
+                        // Broadcast status update based on power profile
+                        if (packetCount % statusBroadcastPacketInterval == 0) {
                             broadcastStatus(STATUS_CONNECTED)
                         }
                     } else {
                         // No data available - sleep to prevent busy-wait loop
                         emptyReadCount++
                         // Use exponential backoff: sleep longer if no packets for a while
+                        // Sleep times scale with power profile's maxSleepMs setting
                         val sleepMs = when {
-                            emptyReadCount < 10 -> 1L      // 1ms for first 10 empty reads
-                            emptyReadCount < 50 -> 5L      // 5ms for next 40 empty reads
-                            else -> 10L                    // 10ms for longer idle periods
-                        }
+                            emptyReadCount < 10 -> maxSleepMs / 10   // Short initial sleep
+                            emptyReadCount < 50 -> maxSleepMs / 4    // Quarter of max
+                            emptyReadCount < 200 -> maxSleepMs / 2   // Half of max
+                            else -> maxSleepMs                       // Full max sleep
+                        }.coerceAtLeast(1L)  // Minimum 1ms
                         Thread.sleep(sleepMs)
                     }
                 } catch (e: Exception) {
@@ -503,14 +522,17 @@ class VPNConnectionService : VpnService() {
                 var healthCheckCycle = 0
                 
                 while (isRunning) {
-                    Thread.sleep(HEALTH_CHECK_INTERVAL_MS)
+                    Thread.sleep(healthCheckIntervalMs)
                     
                     if (!isRunning) break
                     
                     healthCheckCycle++
                     val timeSinceLastPacket = System.currentTimeMillis() - lastPacketTime
                     
-                    Log.d(TAG, "🏥 Health check #$healthCheckCycle: ${timeSinceLastPacket}ms since last packet")
+                    // Battery optimized: only log health check when potentially concerning
+                    if (timeSinceLastPacket > CONNECTION_TIMEOUT_MS / 2) {
+                        Log.d(TAG, "🏥 Health check #$healthCheckCycle: ${timeSinceLastPacket}ms since last packet (threshold: ${CONNECTION_TIMEOUT_MS}ms)")
+                    }
                     
                     if (timeSinceLastPacket > CONNECTION_TIMEOUT_MS) {
                         Log.w(TAG, "⚠️ VPN connection appears dead (no packets for ${timeSinceLastPacket}ms)")
@@ -554,9 +576,8 @@ class VPNConnectionService : VpnService() {
                             stopSelf()
                         }
                         break
-                    } else {
-                        Log.d(TAG, "✅ VPN connection is healthy")
                     }
+                    // Battery optimized: removed verbose "VPN connection is healthy" log
                 }
                 Log.d(TAG, "🏥 Health check thread ended")
             } catch (e: InterruptedException) {
@@ -597,6 +618,59 @@ class VPNConnectionService : VpnService() {
 
         publicIpCheckThread?.interrupt()
         publicIpCheckThread = null
+    }
+
+    /**
+     * Load power profile configuration from SharedPreferences
+     * Profiles: performance, balanced, battery_saver
+     */
+    private fun loadPowerProfileConfig() {
+        try {
+            val prefs = getSharedPreferences("vpn_prefs", MODE_PRIVATE)
+            currentPowerProfile = prefs.getString("power_profile", "balanced") ?: "balanced"
+            
+            when (currentPowerProfile) {
+                "performance" -> {
+                    healthCheckIntervalMs = 15000L    // 15s
+                    publicIpCheckIntervalMs = 30000L  // 30s
+                    maxSleepMs = 10L                  // 10ms
+                    statusBroadcastPacketInterval = 200
+                }
+                "balanced" -> {
+                    healthCheckIntervalMs = 60000L    // 60s
+                    publicIpCheckIntervalMs = 180000L // 3 min
+                    maxSleepMs = 50L                  // 50ms
+                    statusBroadcastPacketInterval = 1000
+                }
+                "battery_saver" -> {
+                    healthCheckIntervalMs = 120000L   // 2 min
+                    publicIpCheckIntervalMs = 600000L // 10 min
+                    maxSleepMs = 200L                 // 200ms
+                    statusBroadcastPacketInterval = 5000
+                }
+                else -> {
+                    // Default to balanced
+                    healthCheckIntervalMs = 60000L
+                    publicIpCheckIntervalMs = 180000L
+                    maxSleepMs = 50L
+                    statusBroadcastPacketInterval = 1000
+                }
+            }
+            
+            Log.d(TAG, "⚡ Power profile loaded: $currentPowerProfile")
+            Log.d(TAG, "  - Health check: ${healthCheckIntervalMs}ms")
+            Log.d(TAG, "  - IP check: ${publicIpCheckIntervalMs}ms")
+            Log.d(TAG, "  - Max sleep: ${maxSleepMs}ms")
+            Log.d(TAG, "  - Broadcast interval: $statusBroadcastPacketInterval packets")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error loading power profile: ${e.message}")
+            // Use balanced defaults
+            currentPowerProfile = "balanced"
+            healthCheckIntervalMs = 60000L
+            publicIpCheckIntervalMs = 180000L
+            maxSleepMs = 50L
+            statusBroadcastPacketInterval = 1000
+        }
     }
 
     /**
@@ -703,7 +777,7 @@ class VPNConnectionService : VpnService() {
                                     sendIpChangedNotification(previousIp, fetchedIp)
                                 }
                             } else {
-                                Log.d(TAG, "ℹ️ Public IP unchanged: $fetchedIp")
+                                // Battery optimized: removed verbose "Public IP unchanged" log
                                 // Still broadcast periodically to keep UI updated
                                 broadcastStatus(STATUS_CONNECTED, force = false, publicIpOverride = fetchedIp)
                             }
@@ -734,8 +808,8 @@ class VPNConnectionService : VpnService() {
                         onProxyError("Proxy check failed: ${e.message}")
                     }
 
-                    // Wait for next check
-                    Thread.sleep(PUBLIC_IP_CHECK_INTERVAL_MS)
+                    // Wait for next check (interval from power profile)
+                    Thread.sleep(publicIpCheckIntervalMs)
                 }
             } catch (e: InterruptedException) {
                 Log.d(TAG, "🛑 Public IP check thread interrupted")

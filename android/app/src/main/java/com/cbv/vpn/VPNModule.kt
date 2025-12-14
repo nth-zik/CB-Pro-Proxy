@@ -1059,6 +1059,49 @@ private fun connectHttpQuick(socket: java.net.Socket, host: String, port: Int, u
 }
 
     @ReactMethod
+    fun setPowerProfile(profile: String, promise: Promise) {
+        try {
+            val validProfiles = listOf("performance", "balanced", "battery_saver")
+            if (profile !in validProfiles) {
+                promise.reject("INVALID_PROFILE", "Invalid power profile: $profile")
+                return
+            }
+            
+            val prefs = reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("power_profile", profile).apply()
+            Log.d(TAG, "⚡ Power profile saved: $profile")
+            
+            // Notify the running VPN service to update its config
+            try {
+                val intent = Intent(reactApplicationContext, VPNConnectionService::class.java)
+                intent.putExtra("action", "update_power_profile")
+                intent.putExtra("power_profile", profile)
+                reactApplicationContext.startService(intent)
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Could not notify VPN service about profile change: ${e.message}")
+            }
+            
+            promise.resolve(null)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error saving power profile: ${e.message}", e)
+            promise.reject("SET_POWER_PROFILE_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
+    fun getPowerProfile(promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
+            val profile = prefs.getString("power_profile", "balanced") ?: "balanced"
+            Log.d(TAG, "📂 Getting power profile: $profile")
+            promise.resolve(profile)
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error getting power profile: ${e.message}", e)
+            promise.reject("GET_POWER_PROFILE_ERROR", e.message, e)
+        }
+    }
+
+    @ReactMethod
     fun prepareVPN(promise: Promise) {
         try {
             Log.d(TAG, "========================================")

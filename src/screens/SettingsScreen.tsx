@@ -37,6 +37,7 @@ import type { Theme, ThemeMode } from "../types/theme";
 import { VPNModule } from "../native/VPNModule";
 import Constants from "expo-constants";
 import { useOnboardingStore } from "../store/onboardingStore";
+import { usePowerProfileStore, POWER_PROFILE_INFO, type PowerProfile } from "../store/powerProfileStore";
 
 interface SettingsScreenProps {
   navigation?: any;
@@ -54,6 +55,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [isLoadingAutoConnect, setIsLoadingAutoConnect] = useState(true);
   const [appVersion, setAppVersion] = useState<string>("Loading...");
 
+  // Power profile state
+  const { currentProfile, setProfile, loadProfile } = usePowerProfileStore();
+
   // Load auto-connect preference and app version on mount
   useEffect(() => {
     const loadSettings = async () => {
@@ -61,11 +65,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         // Load auto-connect preference
         const enabled = await VPNModule.getAutoConnectEnabled();
         setAutoConnect(enabled);
-        
+
         // Get app version from native build config
         const version = Constants.expoConfig?.version ||
-                       Constants.manifest?.version ||
-                       "1.0.0";
+          Constants.manifest?.version ||
+          "1.0.0";
         setAppVersion(version);
         console.log("📱 App version loaded:", version);
       } catch (error) {
@@ -78,7 +82,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     };
 
     loadSettings();
-  }, [modal]);
+    loadProfile(); // Load power profile on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal]); // loadProfile is stable from zustand, no need in deps
 
   // Handle auto-connect toggle
   const handleAutoConnectChange = useCallback(
@@ -130,6 +136,18 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       }
     },
     [setThemeMode, modal]
+  );
+
+  // Handle power profile change
+  const handlePowerProfileChange = useCallback(
+    async (profile: PowerProfile) => {
+      try {
+        await setProfile(profile);
+      } catch (error) {
+        modal.showError("Error", "Failed to change power profile");
+      }
+    },
+    [setProfile, modal]
   );
 
   // Handle view logs - memoized to prevent recreation on each render
@@ -249,6 +267,73 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               {renderThemeModeOption("dark", "Dark", "moon")}
               {renderThemeModeOption("system", "System", "phone-portrait")}
             </View>
+          </ThemedCard>
+
+          {/* Power Profile Section */}
+          <ThemedSectionHeader title="Performance" />
+          <ThemedCard style={styles.card}>
+            <ThemedText size="md" weight="medium" style={styles.sectionTitle}>
+              Power Mode
+            </ThemedText>
+            <ThemedText
+              variant="secondary"
+              size="sm"
+              style={styles.sectionDescription}
+            >
+              Balance between performance and battery life
+            </ThemedText>
+
+            <View style={styles.themeModeContainer}>
+              {POWER_PROFILE_INFO.map((profile) => {
+                const isSelected = currentProfile === profile.id;
+                return (
+                  <TouchableOpacity
+                    key={profile.id}
+                    style={[
+                      styles.themeModeOption,
+                      isSelected && styles.themeModeOptionSelected,
+                    ]}
+                    onPress={() => handlePowerProfileChange(profile.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.themeModeIcon}>
+                      <Ionicons
+                        name={profile.icon as keyof typeof Ionicons.glyphMap}
+                        size={32}
+                        color={
+                          isSelected ? colors.interactive.primary : colors.text.secondary
+                        }
+                      />
+                    </View>
+                    <ThemedText
+                      size="sm"
+                      weight="medium"
+                      variant={isSelected ? "primary" : "secondary"}
+                      style={styles.themeModeLabel}
+                    >
+                      {profile.name}
+                    </ThemedText>
+                    {isSelected && (
+                      <View style={styles.selectedIndicator}>
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={20}
+                          color={colors.interactive.primary}
+                        />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <ThemedText
+              variant="tertiary"
+              size="xs"
+              style={{ marginTop: 8, textAlign: 'center' }}
+            >
+              {POWER_PROFILE_INFO.find(p => p.id === currentProfile)?.description}
+            </ThemedText>
           </ThemedCard>
 
           {/* App Settings Section */}
