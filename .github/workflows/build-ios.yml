@@ -130,23 +130,23 @@ jobs:
       - name: Verify workspace creation
         run: |
           cd ios
-          if [ ! -d "CBVVPN.xcworkspace" ]; then
-            echo "Error: CBVVPN.xcworkspace not found!"
+          if [ ! -d "CBProProxy.xcworkspace" ]; then
+            echo "Error: CBProProxy.xcworkspace not found!"
             echo "Contents of ios directory:"
             ls -la
             exit 1
           fi
           echo "Workspace found successfully"
-          ls -la CBVVPN.xcworkspace/
+          ls -la CBProProxy.xcworkspace/
 
       - name: Build iOS Archive (Unsigned)
         run: |
           cd ios
           xcodebuild \
-            -workspace CBVVPN.xcworkspace \
-            -scheme CBVVPN \
+            -workspace CBProProxy.xcworkspace \
+            -scheme CBProProxy \
             -configuration Release \
-            -archivePath "$PWD/build/CBVVPN.xcarchive" \
+            -archivePath "$PWD/build/CBProProxy.xcarchive" \
             -sdk iphoneos \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
@@ -179,7 +179,7 @@ jobs:
           
           xcodebuild \
             -exportArchive \
-            -archivePath "$PWD/build/CBVVPN.xcarchive" \
+            -archivePath "$PWD/build/CBProProxy.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath "$PWD/build/output" \
             -allowProvisioningUpdates \
@@ -188,19 +188,19 @@ jobs:
             CODE_SIGNING_ALLOWED=NO || true
           
           # If export fails (common for unsigned), extract the app from archive
-          if [ ! -f "$PWD/build/output/CBVVPN.ipa" ]; then
+          if [ ! -f "$PWD/build/output/CBProProxy.ipa" ]; then
             echo "Export failed, creating IPA manually from archive..."
             mkdir -p "$PWD/build/output/Payload"
-            cp -r "$PWD/build/CBVVPN.xcarchive/Products/Applications/CBVVPN.app" "$PWD/build/output/Payload/"
+            cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBProProxy.app" "$PWD/build/output/Payload/"
             cd "$PWD/build/output"
-            zip -r CBVVPN.ipa Payload
+            zip -r CBProProxy.ipa Payload
             rm -rf Payload
           fi
 
       - name: Rename IPA with version
         run: |
           cd ios/build/output
-          mv CBVVPN.ipa "CBVVPN-unsigned-${{ steps.version.outputs.version }}-${{ github.run_number }}.ipa"
+          mv CBProProxy.ipa "CBProProxy-unsigned-${{ steps.version.outputs.version }}-${{ github.run_number }}.ipa"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
