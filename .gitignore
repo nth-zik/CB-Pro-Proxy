@@ -38,6 +38,7 @@ android/build/
 
 # iOS
 ios/build/
+ios/CBVVPNProxyExtension/Tun2Socks/
 
 # Web
 web-build/

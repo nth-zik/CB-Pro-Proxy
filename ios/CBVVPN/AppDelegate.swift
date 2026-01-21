@@ -5,6 +5,9 @@ import ReactAppDependencyProvider
 @UIApplicationMain
 public class AppDelegate: ExpoAppDelegate {
   var window: UIWindow?
+  private let launchUrlKey = "cbvproxy.launchUrl"
+  private let launchUrlEnvKey = "CBVPROXY_URL"
+  private let launchUrlEnvB64Key = "CBVPROXY_URL_B64"
 
   var reactNativeDelegate: ExpoReactNativeFactoryDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
@@ -29,6 +32,7 @@ public class AppDelegate: ExpoAppDelegate {
       launchOptions: launchOptions)
 #endif
 
+    cacheLaunchUrlFromLaunchContext()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -49,6 +53,33 @@ public class AppDelegate: ExpoAppDelegate {
   ) -> Bool {
     let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
+  }
+
+  private func cacheLaunchUrlFromLaunchContext() {
+    if let urlString = extractLaunchUrl() {
+      UserDefaults.standard.set(urlString, forKey: launchUrlKey)
+    }
+  }
+
+  private func extractLaunchUrl() -> String? {
+    let args = ProcessInfo.processInfo.arguments
+    if let urlString = args.first(where: { $0.lowercased().hasPrefix("cbvproxy://") }) {
+      return urlString
+    }
+
+    let env = ProcessInfo.processInfo.environment
+    if let rawUrl = env[launchUrlEnvKey], rawUrl.lowercased().hasPrefix("cbvproxy://") {
+      return rawUrl
+    }
+
+    if let encoded = env[launchUrlEnvB64Key],
+       let data = Data(base64Encoded: encoded),
+       let decoded = String(data: data, encoding: .utf8),
+       decoded.lowercased().hasPrefix("cbvproxy://") {
+      return decoded
+    }
+
+    return nil
   }
 }
 

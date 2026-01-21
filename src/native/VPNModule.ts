@@ -33,6 +33,7 @@ type NativeVPNModuleShape = {
   stopVPN(force?: boolean): Promise<void>;
   getStatus(): Promise<any>;
   refreshStatus(): void;
+  getLaunchUrl?: () => Promise<string | null>;
   setAutoConnectEnabled(enabled: boolean): Promise<void>;
   getAutoConnectEnabled(): Promise<boolean>;
   openVPNSettings(): Promise<boolean>;
@@ -171,6 +172,19 @@ export const VPNModule = {
     } catch (error) {
       logger.error("Failed to get active profile ID", "vpn", error as Error);
       throw error;
+    }
+  },
+  getLaunchUrl: async () => {
+    if (!NativeVPNModule.getLaunchUrl) {
+      return null;
+    }
+    try {
+      return await NativeVPNModule.getLaunchUrl();
+    } catch (error) {
+      logger.warn("Failed to get launch URL", "vpn", {
+        error: (error as Error).message,
+      });
+      return null;
     }
   },
   saveProfile: async (

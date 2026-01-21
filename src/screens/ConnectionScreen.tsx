@@ -17,6 +17,7 @@ import { VPNModule } from "../native";
 import { CustomAlert } from "../components/CustomAlert";
 import { useThemedStyles } from "../hooks/useThemedStyles";
 import { useTheme } from "../hooks/useTheme";
+import { storageService } from "../services/StorageService";
 import type { Theme } from "../types/theme";
 
 interface ConnectionScreenProps {
@@ -385,6 +386,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
     }
 
     setIsConnectingLocal(true);
+    setVPNStatus("connecting");
 
     try {
       if (Platform.OS === "android" && Platform.Version >= 33) {
@@ -409,16 +411,31 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
         activeProfile.name
       );
 
+      const refreshedProfile =
+        (await storageService.getProfileWithCredentials(activeProfile.id)) ||
+        activeProfile;
+
       await VPNModule.startVPNWithProfile(
-        activeProfile.name,
-        activeProfile.host,
-        activeProfile.port,
-        activeProfile.type,
-        activeProfile.username || "",
-        activeProfile.password || "",
-        activeProfile.dns1,
-        activeProfile.dns2
+        refreshedProfile.name,
+        refreshedProfile.host,
+        refreshedProfile.port,
+        refreshedProfile.type,
+        refreshedProfile.username || "",
+        refreshedProfile.password || "",
+        refreshedProfile.dns1,
+        refreshedProfile.dns2
       );
+      if (Platform.OS === "ios") {
+        const status = await VPNModule.getStatus();
+        const state = status?.state || "disconnected";
+        if (state !== "connecting" && state !== "connected") {
+          showAlert(
+            "VPN Not Started",
+            "iOS did not start the VPN. Check Network Extension entitlement and provisioning.",
+            [{ text: "OK" }]
+          );
+        }
+      }
       console.log("✅ VPN started successfully");
     } catch (error: any) {
       let errorMsg = "Unknown error";

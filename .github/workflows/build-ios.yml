@@ -1,0 +1,217 @@
+name: Build iOS IPA (Unsigned)
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Optional version to use (e.g. 1.2.3). If provided, this overrides tag-based version.'
+        required: false
+        default: ''
+      release_notes:
+        description: 'Release notes to include in the GitHub Release'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Release Notes from Commit History
+        id: release_notes
+        run: |
+          echo "Recent tags:"
+          git tag --sort=-v:refname | head -n 5
+          
+          if [[ "${{ github.ref }}" == "refs/tags/"* ]]; then
+            CURRENT_REF="${{ github.ref_name }}"
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_REF}^" 2>/dev/null || echo "")
+          else
+            CURRENT_REF="HEAD"
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          fi
+
+          echo "Generating notes from '$PREVIOUS_TAG' to '$CURRENT_REF'"
+          
+          if [[ -z "$PREVIOUS_TAG" ]]; then
+            echo "No previous tag found. Getting last 20 commits."
+            COMMITS=$(git log -n 20 --pretty=format:"- %s (%h)" "$CURRENT_REF")
+          else
+            COMMITS=$(git log "$PREVIOUS_TAG..$CURRENT_REF" --pretty=format:"- %s (%h)")
+          fi
+
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "LOG<<$EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "$EOF" >> $GITHUB_OUTPUT
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ -n "${{ github.event.inputs.version || '' }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Using manual input version: $VERSION"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "Using tag-based version: $VERSION"
+          else
+            VERSION=1.0.0
+            echo "Using default version: $VERSION"
+          fi
+          VERSION=${VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Update app.json version
+        run: |
+          node -e "
+          const fs = require('fs');
+          const appJson = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          appJson.expo.version = '${{ steps.version.outputs.version }}';
+          appJson.expo.ios.buildNumber = '${{ github.run_number }}';
+          fs.writeFileSync('app.json', JSON.stringify(appJson, null, 2));
+          "
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: false
+
+      - name: Install CocoaPods
+        run: |
+          gem install cocoapods -v '~> 1.16'
+
+      - name: Prebuild Expo iOS
+        run: |
+          npx expo prebuild --platform ios --clean
+          
+      - name: Install iOS dependencies
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build iOS Archive (Unsigned)
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace CBVVPN.xcworkspace \
+            -scheme CBVVPN \
+            -configuration Release \
+            -archivePath "$PWD/build/CBVVPN.xcarchive" \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean archive
+
+      - name: Export IPA (Unsigned)
+        run: |
+          cd ios
+          
+          # Create export options plist for ad-hoc (unsigned)
+          cat > ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>compileBitcode</key>
+            <false/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadSymbols</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+          
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$PWD/build/CBVVPN.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "$PWD/build/output" \
+            -allowProvisioningUpdates \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO || true
+          
+          # If export fails (common for unsigned), extract the app from archive
+          if [ ! -f "$PWD/build/output/CBVVPN.ipa" ]; then
+            echo "Export failed, creating IPA manually from archive..."
+            mkdir -p "$PWD/build/output/Payload"
+            cp -r "$PWD/build/CBVVPN.xcarchive/Products/Applications/CBVVPN.app" "$PWD/build/output/Payload/"
+            cd "$PWD/build/output"
+            zip -r CBVVPN.ipa Payload
+            rm -rf Payload
+          fi
+
+      - name: Rename IPA with version
+        run: |
+          cd ios/build/output
+          mv CBVVPN.ipa "CBVVPN-unsigned-${{ steps.version.outputs.version }}-${{ github.run_number }}.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: ios/build/output/*.ipa
+          retention-days: 30
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ios/build/output/*.ipa
+          body: |
+            ## iOS Unsigned IPA - v${{ steps.version.outputs.version }}
+            
+            ### Release Notes
+            ${{ github.event.inputs.release_notes || steps.release_notes.outputs.LOG }}
+            
+            ### Installation Instructions
+            This is an **unsigned IPA**. To install on your device:
+            
+            1. **Option 1: Sign with your own certificate**
+               - Use tools like iOS App Signer or Xcode to resign the IPA
+               - Install via Xcode or AltStore
+            
+            2. **Option 2: Jailbroken devices**
+               - Install directly using tools like Filza or AppSync Unified
+            
+            3. **Option 3: Use signing services**
+               - Use third-party signing services (at your own risk)
+            
+            ### Build Information
+            - Version: ${{ steps.version.outputs.version }}
+            - Build Number: ${{ github.run_number }}
+            - Commit: ${{ github.sha }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

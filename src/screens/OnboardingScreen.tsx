@@ -43,16 +43,48 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(30));
 
+  const withTimeout = async <T,>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    message: string
+  ): Promise<T> => {
+    return await new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(message));
+      }, timeoutMs);
+
+      promise
+        .then((value) => {
+          clearTimeout(timer);
+          resolve(value);
+        })
+        .catch((error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+    });
+  };
+
+  const isIOS = Platform.OS === "ios";
   const steps: OnboardingStep[] = [
     {
       id: "vpn_permission",
       title: "VPN Permission",
-      description: "Allow this app to create VPN connections for secure proxy tunneling. A system dialog will appear to confirm.",
+      description: isIOS
+        ? "iOS will request VPN permission on your first connection."
+        : "Allow this app to create VPN connections for secure proxy tunneling. A system dialog will appear to confirm.",
       icon: "shield-checkmark",
       action: async () => {
         try {
+          if (isIOS) {
+            return true;
+          }
           // This triggers the VPN permission dialog (same as when pressing Connect)
-          const result = await VPNModule.prepareVPN();
+          const result = await withTimeout(
+            VPNModule.prepareVPN(),
+            12000,
+            "VPN permission request timed out"
+          );
           return result === true;
         } catch (error: any) {
           // User denied permission

@@ -170,6 +170,45 @@ See [`ADB_INTENT_COMMANDS.md`](./ADB_INTENT_COMMANDS.md) for the full catalogue,
 
 ---
 
+## iOS URL Scheme Automation
+
+For iOS automation, the app registers the `cbvproxy://` URL scheme. You can trigger connect/disconnect from scripts, Shortcuts, or other apps.
+
+Supported actions:
+
+- `cbvproxy://connect?profileId=<uuid>`
+- `cbvproxy://connect?profileName=<name>`
+- `cbvproxy://add?host=<host>&port=<port>&type=<socks5|http>`
+- `cbvproxy://add-and-connect?host=<host>&port=<port>&type=<socks5|http>`
+- `cbvproxy://disconnect`
+
+Example (iOS Simulator):
+
+```bash
+# Connect by profile name
+xcrun simctl openurl booted "cbvproxy://connect?profileName=My%20Proxy"
+
+# Connect by profile id
+xcrun simctl openurl booted "cbvproxy://connect?profileId=YOUR_PROFILE_ID"
+
+# Disconnect
+xcrun simctl openurl booted "cbvproxy://disconnect"
+```
+
+Add or update a profile (and optionally connect):
+
+```bash
+# Create/update a profile with a stable ID
+xcrun simctl openurl booted "cbvproxy://add?profileId=proxy-123&host=203.0.113.10&port=1080&type=socks5"
+
+# Create/update and connect immediately
+xcrun simctl openurl booted "cbvproxy://add-and-connect?profileId=proxy-123&host=203.0.113.10&port=1080&type=socks5&username=user&password=secret"
+```
+
+> **Note:** Use URL-encoded values for `profileName`, `username`, and `password`. `add` will create or update the profile if the `profileId` already exists.
+
+---
+
 ## Build for Production
 
 ### Android

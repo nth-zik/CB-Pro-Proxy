@@ -2,6 +2,7 @@
   "expo": {
     "name": "CB Pro Proxy",
     "slug": "cbv-vpn-app",
+    "scheme": "cbvproxy",
     "version": "1.0.14",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,7 +21,8 @@
           "NSAllowsArbitraryLoads": true
         },
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes for quick proxy import."
-      }
+      },
+      "appleTeamId": "K5J34NK56Q"
     },
     "android": {
       "package": "com.cbv.vpn",
@@ -50,7 +52,9 @@
             "compileSdkVersion": 35,
             "targetSdkVersion": 35,
             "buildToolsVersion": "35.0.0",
-            "extraMavenRepos": ["https://maven.google.com"]
+            "extraMavenRepos": [
+              "https://maven.google.com"
+            ]
           },
           "ios": {
             "deploymentTarget": "15.1"

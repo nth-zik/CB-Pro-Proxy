@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppNavigator } from "./src/navigation/AppNavigator";
-import { useVPNEvents } from "./src/hooks";
+import { useDeepLinking, useVPNEvents } from "./src/hooks";
 import { ProfileNotification } from "./src/components";
 import { ThemeProvider } from "./src/contexts/ThemeContext";
 import { useThemeStore } from "./src/store/themeStore";
@@ -70,6 +70,7 @@ function AppContent() {
 
   // Listen to VPN events
   useVPNEvents();
+  useDeepLinking();
 
   // Get current theme for StatusBar
   const { currentTheme } = useThemeStore();

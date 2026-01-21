@@ -43,6 +43,7 @@ interface VPNStore {
 
   // Actions - VPN Control
   setVPNStatus: (status: VPNStatus | VPNStatusInfo) => void;
+  setPublicIp: (ip: string | null) => void;
   setError: (error: unknown) => void;
   clearError: () => void;
   setProfileNotification: (notification: ProfileNotification | null) => void;
@@ -396,6 +397,7 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
 
   // VPN Control Actions
   setVPNStatus: (status) => {
+    const currentState = get();
     if (typeof status === "string") {
       logger.info("VPN status changed", "vpn", {
         status,
@@ -414,25 +416,37 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
       }
       // Removed connecting/disconnected logs
 
+      const isConnected = status === "connected";
+      const connectionStats = {
+        durationMillis: isConnected ? currentState.connectionStats.durationMillis : 0,
+        bytesUp: isConnected ? currentState.connectionStats.bytesUp : 0,
+        bytesDown: isConnected ? currentState.connectionStats.bytesDown : 0,
+        publicIp: isConnected ? currentState.connectionStats.publicIp : undefined,
+      };
+      const publicIp = isConnected ? currentState.publicIp : null;
+      const nextError = status === "connected" ? null : status === "error" ? currentState.error : null;
+
+      const hasChanges =
+        currentState.vpnStatus !== status ||
+        currentState.isConnected !== isConnected ||
+        currentState.publicIp !== publicIp ||
+        currentState.error !== nextError ||
+        currentState.connectionStats.durationMillis !== connectionStats.durationMillis ||
+        currentState.connectionStats.bytesUp !== connectionStats.bytesUp ||
+        currentState.connectionStats.bytesDown !== connectionStats.bytesDown ||
+        currentState.connectionStats.publicIp !== connectionStats.publicIp;
+
+      if (!hasChanges) {
+        return;
+      }
+
       set({
         vpnStatus: status,
-        isConnected: status === "connected",
-        connectionStats: {
-          durationMillis:
-            status === "connected" ? get().connectionStats.durationMillis : 0,
-          bytesUp: status === "connected" ? get().connectionStats.bytesUp : 0,
-          bytesDown:
-            status === "connected" ? get().connectionStats.bytesDown : 0,
-          publicIp:
-            status === "connected" ? get().connectionStats.publicIp : undefined,
-        },
-        publicIp: status === "connected" ? get().publicIp : null,
+        isConnected,
+        connectionStats,
+        publicIp,
+        error: nextError,
       });
-      if (status !== "connected") {
-        set({ error: status === "error" ? get().error : null });
-      } else {
-        set({ error: null });
-      }
       return;
     }
 
@@ -463,16 +477,47 @@ export const useVPNStore = create<VPNStore>((set, get) => ({
     }
     // Removed connecting/disconnected logs
 
+    const nextError = statusInfo.state === "connected" ? null : currentState.error;
+    const nextPublicIp = statusInfo.stats.publicIp ?? null;
+    const hasChanges =
+      currentState.vpnStatus !== statusInfo.state ||
+      currentState.isConnected !== statusInfo.isConnected ||
+      currentState.publicIp !== nextPublicIp ||
+      currentState.error !== nextError ||
+      currentState.connectionStats.durationMillis !== statusInfo.stats.durationMillis ||
+      currentState.connectionStats.bytesUp !== statusInfo.stats.bytesUp ||
+      currentState.connectionStats.bytesDown !== statusInfo.stats.bytesDown ||
+      currentState.connectionStats.publicIp !== statusInfo.stats.publicIp;
+
+    if (!hasChanges) {
+      return;
+    }
+
     set({
       vpnStatus: statusInfo.state,
       isConnected: statusInfo.isConnected,
       connectionStats: statusInfo.stats,
-      publicIp: statusInfo.stats.publicIp ?? null,
+      publicIp: nextPublicIp,
+      error: nextError,
     });
+  },
 
-    if (statusInfo.state === "connected") {
-      set({ error: null });
+  setPublicIp: (ip) => {
+    const currentState = get();
+    const nextIp = ip || null;
+    if (
+      currentState.publicIp === nextIp &&
+      currentState.connectionStats.publicIp === nextIp
+    ) {
+      return;
     }
+    set({
+      publicIp: nextIp,
+      connectionStats: {
+        ...currentState.connectionStats,
+        publicIp: nextIp || undefined,
+      },
+    });
   },
 
   setError: (error: unknown) => {

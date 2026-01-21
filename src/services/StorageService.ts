@@ -334,7 +334,21 @@ export class StorageService {
       }
 
       if (this.useSQLite) {
-        return await profileRepository.getAll();
+        const profiles = await profileRepository.getAll();
+        const enriched = await Promise.all(
+          profiles.map(async (profile) => {
+            const credentials = await this.getCredentials(profile.id);
+            if (credentials) {
+              return {
+                ...profile,
+                username: credentials.username,
+                password: credentials.password,
+              };
+            }
+            return profile;
+          })
+        );
+        return enriched;
       }
 
       return await this.getProfilesFromAsyncStorage();
@@ -476,6 +490,41 @@ export class StorageService {
       return profiles.find((p) => p.id === id) || null;
     } catch (error) {
       console.error("Error getting profile:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Get a profile with credentials loaded from SecureStore when available
+   */
+  async getProfileWithCredentials(id: string): Promise<ProxyProfile | null> {
+    await this.initialize();
+
+    try {
+      let profile: ProxyProfile | null = null;
+      if (this.useSQLite) {
+        profile = await profileRepository.getById(id);
+      } else {
+        const profiles = await this.getProfilesFromAsyncStorage();
+        profile = profiles.find((p) => p.id === id) || null;
+      }
+
+      if (!profile) {
+        return null;
+      }
+
+      const credentials = await this.getCredentials(id);
+      if (credentials) {
+        return {
+          ...profile,
+          username: credentials.username,
+          password: credentials.password,
+        };
+      }
+
+      return profile;
+    } catch (error) {
+      console.error("Error getting profile with credentials:", error);
       return null;
     }
   }
