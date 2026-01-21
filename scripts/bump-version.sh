@@ -2,8 +2,10 @@
 
 # =============================================================================
 # Bump Version Script
-# Usage: ./scripts/bump-version.sh [major|minor|patch]
+# Usage: ./scripts/bump-version.sh [major|minor|patch] [--yes|-y]
 # Default: patch
+# Options:
+#   --yes, -y: Skip confirmation prompt
 # =============================================================================
 
 set -e
@@ -15,8 +17,25 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Get the bump type (default: patch)
-BUMP_TYPE=${1:-patch}
+# Parse arguments
+BUMP_TYPE="patch"
+SKIP_CONFIRM=false
+
+for arg in "$@"; do
+  case $arg in
+    major|minor|patch)
+      BUMP_TYPE=$arg
+      ;;
+    --yes|-y)
+      SKIP_CONFIRM=true
+      ;;
+    *)
+      echo -e "${RED}❌ Invalid argument: $arg${NC}"
+      echo "Usage: $0 [major|minor|patch] [--yes|-y]"
+      exit 1
+      ;;
+  esac
+done
 
 echo -e "${BLUE}🔍 Getting current version from git tags...${NC}"
 
@@ -54,6 +73,49 @@ NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
 NEW_TAG="v${NEW_VERSION}"
 
 echo -e "${GREEN}🚀 New version: ${NEW_VERSION}${NC}"
+echo ""
+
+# Calculate Android versionCode for preview
+GRADLE_FILE="android/app/build.gradle"
+PREVIEW_VERSION_CODE=""
+if [ -f "$GRADLE_FILE" ]; then
+  CURRENT_VERSION_CODE=$(grep -o 'versionCode [0-9]*' "$GRADLE_FILE" | head -1 | awk '{print $2}')
+  PREVIEW_VERSION_CODE=$((CURRENT_VERSION_CODE + 1))
+fi
+
+# Show summary of changes
+echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║        📋 Summary of Changes          ║${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
+echo -e "  ${YELLOW}Bump type:${NC}       ${BUMP_TYPE}"
+echo -e "  ${YELLOW}Old version:${NC}     ${CURRENT_VERSION}"
+echo -e "  ${GREEN}New version:${NC}     ${NEW_VERSION}"
+echo -e "  ${BLUE}Git tag:${NC}         ${NEW_TAG}"
+if [ -n "$PREVIEW_VERSION_CODE" ]; then
+  echo -e "  ${YELLOW}Android code:${NC}    ${CURRENT_VERSION_CODE} → ${PREVIEW_VERSION_CODE}"
+fi
+echo ""
+echo -e "${YELLOW}📝 Files to be updated:${NC}"
+[ -f "app.json" ] && echo "  • app.json"
+[ -f "package.json" ] && echo "  • package.json"
+[ -f "$GRADLE_FILE" ] && echo "  • android/app/build.gradle"
+echo ""
+
+# Confirmation prompt
+if [ "$SKIP_CONFIRM" = false ]; then
+  echo -e "${YELLOW}⚠️  This will:${NC}"
+  echo "  1. Update version in project files"
+  echo "  2. Commit changes with message: 'chore: bump version to ${NEW_VERSION}'"
+  echo "  3. Create git tag: ${NEW_TAG}"
+  echo ""
+  read -p "$(echo -e ${GREEN}Do you want to continue? [y/N]:${NC} )" -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo -e "${RED}❌ Version bump cancelled${NC}"
+    exit 1
+  fi
+  echo ""
+fi
 
 # Update app.json
 APP_JSON="app.json"
@@ -114,13 +176,16 @@ echo -e "${BLUE}🏷️  Creating git tag ${NEW_TAG}...${NC}"
 git tag -a "$NEW_TAG" -m "Release ${NEW_VERSION}"
 
 echo ""
-echo -e "${GREEN}============================================${NC}"
-echo -e "${GREEN}✅ Version bumped successfully!${NC}"
-echo -e "${GREEN}============================================${NC}"
-echo -e "${YELLOW}   Old version: ${CURRENT_VERSION}${NC}"
-echo -e "${GREEN}   New version: ${NEW_VERSION}${NC}"
-echo -e "${BLUE}   Git tag: ${NEW_TAG}${NC}"
+echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   ✅ Version Bumped Successfully! 🎉   ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
+echo -e "  ${YELLOW}Old version:${NC}  ${CURRENT_VERSION}"
+echo -e "  ${GREEN}New version:${NC}  ${NEW_VERSION}"
+echo -e "  ${BLUE}Git tag:${NC}      ${NEW_TAG}"
 echo ""
-echo -e "${YELLOW}📤 To push changes and tag:${NC}"
-echo -e "   git push && git push --tags"
+echo -e "${YELLOW}📤 Next steps:${NC}"
+echo -e "   ${BLUE}1.${NC} Review changes: ${BLUE}git log -1${NC}"
+echo -e "   ${BLUE}2.${NC} Push to remote: ${GREEN}git push && git push --tags${NC}"
+echo ""
+echo -e "${YELLOW}💡 Tip:${NC} The tag will trigger CI/CD workflows to build releases"
 echo ""
