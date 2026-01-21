@@ -3,8 +3,6 @@ name: Build Android APK
 on:
   push:
     branches: [main]
-    tags:
-      - "v*"
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -142,19 +140,4 @@ jobs:
         with:
           name: cbv-vpn-v${{ steps.version.outputs.version }}.apk
           path: android/app/build/outputs/apk/release/cbv-vpn-v${{ steps.version.outputs.version }}.apk
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v1
-        with:
-          files: android/app/build/outputs/apk/release/cbv-vpn-v${{ steps.version.outputs.version }}.apk
-          tag_name: v${{ steps.version.outputs.version }}
-          body: |
-            Android APK Release - Version ${{ steps.version.outputs.version }}
-            
-            ${{ github.event.inputs.release_notes }}
-            
-            ## Change Log
-            ${{ steps.release_notes.outputs.LOG }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          retention-days: 30

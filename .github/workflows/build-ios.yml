@@ -3,8 +3,6 @@ name: Build iOS IPA (Unsigned)
 on:
   push:
     branches: [main]
-    tags:
-      - "v*"
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -208,36 +206,3 @@ jobs:
           name: ios-unsigned-ipa
           path: ios/build/output/*.ipa
           retention-days: 30
-
-      - name: Create GitHub Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ios/build/output/*.ipa
-          body: |
-            ## iOS Unsigned IPA - v${{ steps.version.outputs.version }}
-            
-            ### Release Notes
-            ${{ github.event.inputs.release_notes || steps.release_notes.outputs.LOG }}
-            
-            ### Installation Instructions
-            This is an **unsigned IPA**. To install on your device:
-            
-            1. **Option 1: Sign with your own certificate**
-               - Use tools like iOS App Signer or Xcode to resign the IPA
-               - Install via Xcode or AltStore
-            
-            2. **Option 2: Jailbroken devices**
-               - Install directly using tools like Filza or AppSync Unified
-            
-            3. **Option 3: Use signing services**
-               - Use third-party signing services (at your own risk)
-            
-            ### Build Information
-            - Version: ${{ steps.version.outputs.version }}
-            - Build Number: ${{ github.run_number }}
-            - Commit: ${{ github.sha }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

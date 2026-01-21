@@ -1,0 +1,301 @@
+name: Build Release (Android + iOS)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to use (e.g. 1.2.3). Required for manual runs.'
+        required: true
+        default: ''
+      release_notes:
+        description: 'Release notes to include in the GitHub Release'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  # Generate release notes once for both platforms
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_notes: ${{ steps.release_notes.outputs.LOG }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Release Notes from Commit History
+        id: release_notes
+        run: |
+          echo "Recent tags:"
+          git tag --sort=-v:refname | head -n 5
+          
+          if [[ "${{ github.ref }}" == "refs/tags/"* ]]; then
+            CURRENT_REF="${{ github.ref_name }}"
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_REF}^" 2>/dev/null || echo "")
+          else
+            CURRENT_REF="HEAD"
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          fi
+
+          echo "Generating notes from '$PREVIOUS_TAG' to '$CURRENT_REF'"
+          
+          if [[ -z "$PREVIOUS_TAG" ]]; then
+            echo "No previous tag found. Getting last 20 commits."
+            COMMITS=$(git log -n 20 --pretty=format:"- %s (%h)" "$CURRENT_REF")
+          else
+            COMMITS=$(git log "$PREVIOUS_TAG..$CURRENT_REF" --pretty=format:"- %s (%h)")
+          fi
+
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "LOG<<$EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "$EOF" >> $GITHUB_OUTPUT
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ -n "${{ github.event.inputs.version || '' }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Using manual input version: $VERSION"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "Using tag-based version: $VERSION"
+          else
+            echo "ERROR: Version must be provided for manual runs"
+            exit 1
+          fi
+          VERSION=${VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  # Build Android APK
+  build-android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Update app.json version
+        run: |
+          node -e "
+          const fs = require('fs');
+          const appJson = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          appJson.expo.version = '${{ needs.prepare.outputs.version }}';
+          appJson.expo.android.versionCode = ${{ github.run_number }};
+          fs.writeFileSync('app.json', JSON.stringify(appJson, null, 2));
+          "
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Prebuild Expo Android
+        run: npx expo prebuild --platform android --clean
+
+      - name: Decode Keystore
+        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+      - name: Build Android Release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Rename APK with version
+        run: |
+          mkdir -p build-output
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             "build-output/cbv-vpn-v${{ needs.prepare.outputs.version }}.apk"
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: build-output/*.apk
+          retention-days: 5
+
+  # Build iOS IPA
+  build-ios:
+    needs: prepare
+    runs-on: macos-15
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm install
+          npm install -g expo-cli @expo/cli
+
+      - name: Update app.json version
+        run: |
+          node -e "
+          const fs = require('fs');
+          const appJson = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          appJson.expo.version = '${{ needs.prepare.outputs.version }}';
+          appJson.expo.ios.buildNumber = '${{ github.run_number }}';
+          fs.writeFileSync('app.json', JSON.stringify(appJson, null, 2));
+          "
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: false
+
+      - name: Install CocoaPods
+        run: gem install cocoapods -v '~> 1.16'
+
+      - name: Prebuild Expo iOS
+        run: |
+          npx expo prebuild --platform ios --clean
+          
+      - name: Install iOS dependencies
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build iOS Archive (Unsigned)
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace CBProProxy.xcworkspace \
+            -scheme CBProProxy \
+            -configuration Release \
+            -archivePath "$PWD/build/CBProProxy.xcarchive" \
+            -sdk iphoneos \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            clean archive
+
+      - name: Export IPA (Unsigned)
+        run: |
+          cd ios
+          
+          # Create IPA manually from archive
+          echo "Creating IPA from archive..."
+          mkdir -p "$PWD/build/output/Payload"
+          cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBProProxy.app" "$PWD/build/output/Payload/"
+          cd "$PWD/build/output"
+          zip -r CBProProxy.ipa Payload
+          rm -rf Payload
+
+      - name: Rename IPA with version
+        run: |
+          mkdir -p build-output
+          cp ios/build/output/CBProProxy.ipa \
+             "build-output/cbv-vpn-unsigned-v${{ needs.prepare.outputs.version }}.ipa"
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: build-output/*.ipa
+          retention-days: 5
+
+  # Create unified GitHub Release
+  create-release:
+    needs: [prepare, build-android, build-ios]
+    runs-on: ubuntu-latest
+    if: always() && (needs.build-android.result == 'success' || needs.build-ios.result == 'success')
+    
+    steps:
+      - name: Download Android APK
+        if: needs.build-android.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: release-assets
+
+      - name: Download iOS IPA
+        if: needs.build-ios.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-ipa
+          path: release-assets
+
+      - name: List release assets
+        run: |
+          echo "Release assets:"
+          ls -lh release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || format('v{0}', needs.prepare.outputs.version) }}
+          name: Release v${{ needs.prepare.outputs.version }}
+          files: release-assets/*
+          body: |
+            # 🚀 Release v${{ needs.prepare.outputs.version }}
+            
+            ## 📦 Downloads
+            
+            ### Android APK (Signed)
+            ${{ needs.build-android.result == 'success' && '✅ Available' || '❌ Build failed' }}
+            - **File**: `cbv-vpn-v${{ needs.prepare.outputs.version }}.apk`
+            - **Installation**: Enable "Unknown sources" in Android settings, then install the APK
+            
+            ### iOS IPA (Unsigned)
+            ${{ needs.build-ios.result == 'success' && '✅ Available' || '❌ Build failed' }}
+            - **File**: `cbv-vpn-unsigned-v${{ needs.prepare.outputs.version }}.ipa`
+            - **Installation Options**:
+              1. Sign with your own certificate using iOS App Signer or Xcode
+              2. Install directly on jailbroken devices
+              3. Use third-party signing services (at your own risk)
+            
+            ## 📝 What's Changed
+            
+            ${{ github.event.inputs.release_notes || needs.prepare.outputs.release_notes }}
+            
+            ## 🔧 Build Information
+            
+            - **Version**: ${{ needs.prepare.outputs.version }}
+            - **Build Number**: ${{ github.run_number }}
+            - **Commit**: ${{ github.sha }}
+            - **Android Status**: ${{ needs.build-android.result }}
+            - **iOS Status**: ${{ needs.build-ios.result }}
+            
+            ---
+            
+            *Built with ❤️ using GitHub Actions*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
