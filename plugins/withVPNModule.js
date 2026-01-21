@@ -26,6 +26,18 @@ const withVPNModule = (config) => {
       if (fs.existsSync(mainApplicationPath)) {
         let content = fs.readFileSync(mainApplicationPath, 'utf-8');
 
+        // Add import statement for VPNPackage if not present
+        if (!content.includes('import com.cbv.vpn.VPNPackage')) {
+          // Find the last import statement and add our import after it
+          const lastImportMatch = content.match(/import .*\n(?!import)/);
+          if (lastImportMatch) {
+            const lastImportIndex = content.indexOf(lastImportMatch[0]) + lastImportMatch[0].length;
+            content = content.slice(0, lastImportIndex) + 
+                      '\n// Import VPN package\nimport com.cbv.vpn.VPNPackage\n' +
+                      content.slice(lastImportIndex);
+          }
+        }
+
         // Add VPNPackage to packages list if not present
         if (!content.includes('VPNPackage()')) {
           content = content.replace(
@@ -35,7 +47,7 @@ const withVPNModule = (config) => {
         }
 
         fs.writeFileSync(mainApplicationPath, content);
-        console.log('✅ Added VPNPackage to MainApplication.kt');
+        console.log('✅ Added VPNPackage import and registration to MainApplication.kt');
       }
 
       // Copy native files from template
