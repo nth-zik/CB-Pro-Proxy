@@ -402,14 +402,16 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const tagName = '${{ github.ref_name }}' || 'v${{ needs.prepare.outputs.version }}';
             const release = await github.rest.repos.getReleaseByTag({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag: '${{ github.ref_name || format(\'v{0}\', needs.prepare.outputs.version) }}'
+              tag: tagName
             });
             
+            const track = '${{ github.event.inputs.playstore_track }}' || 'internal';
             const newBody = release.data.body + '\n\n---\n\n## 🏪 Google Play Store Deployment\n\n' +
-              '✅ Successfully deployed to **${{ github.event.inputs.playstore_track || \'internal\' }}** track\n' +
+              '✅ Successfully deployed to **' + track + '** track\n' +
               '- **Version**: ${{ needs.prepare.outputs.version }}\n' +
               '- **Build Number**: ${{ github.run_number }}\n' +
               '- **Deployed at**: ' + new Date().toISOString();
