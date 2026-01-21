@@ -54,17 +54,26 @@ const withVPNModule = (config) => {
       const templateDir = path.join(__dirname, '..', 'native-templates', 'android');
       
       if (fs.existsSync(templateDir)) {
-        const files = ['VPNModule.kt', 'VPNPackage.kt', 'CBVVpnService.kt'];
+        console.log(`📂 Copying VPN native modules from ${templateDir}`);
         
+        // Get all .kt files from template directory
+        const files = fs.readdirSync(templateDir).filter(file => file.endsWith('.kt'));
+        
+        let copiedCount = 0;
         files.forEach(file => {
           const src = path.join(templateDir, file);
           const dest = path.join(javaDir, file);
           
           if (fs.existsSync(src)) {
             fs.copyFileSync(src, dest);
-            console.log(`✅ Copied ${file}`);
+            copiedCount++;
           }
         });
+        
+        console.log(`✅ Copied ${copiedCount} VPN native modules to Android project`);
+      } else {
+        console.warn(`⚠️  Template directory not found: ${templateDir}`);
+        console.warn('VPN modules may not be available. Please ensure native-templates/android exists.');
       }
 
       return config;

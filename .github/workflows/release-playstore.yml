@@ -1,9 +1,6 @@
 name: Build & Release to Google Play Store
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       track:
@@ -235,7 +232,6 @@ jobs:
     name: Deploy to Google Play Store
     needs: [setup, build, screenshots]
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }} || ${{ github.event_name == 'workflow_dispatch' }}
     timeout-minutes: 30
     
     steps:
@@ -281,11 +277,7 @@ jobs:
       - name: Determine release track
         id: track
         run: |
-          if [[ $GITHUB_REF == refs/tags/* ]]; then
-            TRACK="production"
-          else
-            TRACK="${{ github.event.inputs.track }}"
-          fi
+          TRACK="${{ github.event.inputs.track }}"
           echo "track=$TRACK" >> $GITHUB_OUTPUT
           echo "🎯 Release Track: $TRACK"
 
@@ -296,29 +288,16 @@ jobs:
         run: |
           bundle exec fastlane android release_to_playstore track:${{ steps.track.outputs.track }} release_status:draft
 
-      - name: Create GitHub Release
-        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
-        uses: softprops/action-gh-release@v1
-        with:
-          body: |
-            ## Version ${{ needs.setup.outputs.version }}
-            
-            ### 📊 Build Information
-            - Build Number: ${{ needs.setup.outputs.build_number }}
-            - Track: production
-            
-            ### 🔗 Artifacts
-            - [app-release.aab](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-release.aab)
-            - [app-release.apk](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/app-release.apk)
-            
-            ✅ Successfully deployed to Google Play Store (Draft)
-          files: |
-            CB-Pro-Proxy/app/build/outputs/bundle/release/app-release.aab
-            CB-Pro-Proxy/app/build/outputs/apk/release/app-release.apk
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create deployment summary
+        run: |
+          echo "## 🏪 Google Play Store Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Successfully deployed to **${{ steps.track.outputs.track }}** track" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ needs.setup.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Number**: ${{ needs.setup.outputs.build_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Track**: ${{ steps.track.outputs.track }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: Draft (ready for review)" >> $GITHUB_STEP_SUMMARY
 
       - name: Notify Slack (optional)
         if: always()
