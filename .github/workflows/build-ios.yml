@@ -82,7 +82,10 @@ jobs:
           cache: "npm"
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm install
+          # Install expo-cli globally to ensure prebuild works
+          npm install -g expo-cli @expo/cli
 
       - name: Update app.json version
         run: |
@@ -106,12 +109,35 @@ jobs:
 
       - name: Prebuild Expo iOS
         run: |
+          echo "Starting Expo prebuild..."
           npx expo prebuild --platform ios --clean
+          echo "Prebuild completed"
+          
+      - name: Verify iOS directory
+        run: |
+          echo "Checking iOS directory structure..."
+          ls -la ios/
+          echo "Checking for xcodeproj..."
+          ls -la ios/*.xcodeproj/ || echo "No xcodeproj found"
+          echo "Checking for xcworkspace..."
+          ls -la ios/*.xcworkspace/ || echo "No xcworkspace found yet"
           
       - name: Install iOS dependencies
         run: |
           cd ios
           pod install --repo-update
+          
+      - name: Verify workspace creation
+        run: |
+          cd ios
+          if [ ! -d "CBVVPN.xcworkspace" ]; then
+            echo "Error: CBVVPN.xcworkspace not found!"
+            echo "Contents of ios directory:"
+            ls -la
+            exit 1
+          fi
+          echo "Workspace found successfully"
+          ls -la CBVVPN.xcworkspace/
 
       - name: Build iOS Archive (Unsigned)
         run: |
