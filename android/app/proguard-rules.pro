@@ -11,4 +11,10 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
+# Keep VPN classes - prevent ProGuard from removing them
+-keep class com.cbv.vpn.VPNIntentReceiver { *; }
+-keep class com.cbv.vpn.VPNConnectionService { *; }
+-keep class com.cbv.vpn.VPNPermissionActivity { *; }
+-keep class com.cbv.vpn.** { *; }
+
 # Add any project specific keep options here:

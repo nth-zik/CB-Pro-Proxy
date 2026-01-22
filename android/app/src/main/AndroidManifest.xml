@@ -48,7 +48,9 @@
     <activity android:name=".VPNPermissionActivity"
       android:exported="false" android:theme="@style/AppTheme"
       android:launchMode="singleTop" />
-    <receiver android:name=".VPNIntentReceiver" android:exported="true"
+    <receiver android:name=".VPNIntentReceiver"
+      android:enabled="true"
+      android:exported="true"
       android:directBootAware="true">
       <intent-filter>
         <action android:name="com.cbv.vpn.ADD_PROFILE" />
