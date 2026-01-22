@@ -116,9 +116,6 @@ jobs:
           echo "✅ Updated build.gradle:"
           grep -A 2 "versionCode\|versionName" android/app/build.gradle
 
-      - name: Prebuild for Android
-        run: npx expo prebuild --platform android --no-install
-
       - name: Decode Keystore
         run: echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
         env:

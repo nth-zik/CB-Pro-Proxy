@@ -18,6 +18,8 @@ class VPNIntentReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "VPNIntentReceiver"
+        private const val PREFS_NAME = "vpn_prefs"
+        private const val KEY_PENDING_PROFILE_JSON = "pending_profile_json"
 
         // Intent actions
         const val ACTION_ADD_PROFILE = "com.cbv.vpn.ADD_PROFILE"
@@ -144,6 +146,7 @@ class VPNIntentReceiver : BroadcastReceiver() {
                                         "ForegroundServiceStartNotAllowedException"
                                 )
                 if (shouldBringToFront) {
+                    savePendingProfile(context, profile)
                     val launchIntent =
                             context.packageManager.getLaunchIntentForPackage(context.packageName)
                     launchIntent?.apply {
@@ -159,6 +162,39 @@ class VPNIntentReceiver : BroadcastReceiver() {
             }
 
             Log.d(TAG, "✅ VPN service started successfully")
+        }
+
+        @JvmStatic
+        fun tryStartPendingProfile(context: Context) {
+            val pendingProfile = consumePendingProfile(context) ?: return
+            Log.d(TAG, "🔁 Retrying VPN start for pending automation profile")
+            startVpnService(context, pendingProfile)
+        }
+
+        private fun savePendingProfile(context: Context, profile: JSONObject) {
+            try {
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                prefs.edit().putString(KEY_PENDING_PROFILE_JSON, profile.toString()).apply()
+                Log.d(TAG, "💾 Saved pending automation profile for retry")
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Failed to save pending profile: ${e.message}")
+            }
+        }
+
+        private fun consumePendingProfile(context: Context): JSONObject? {
+            return try {
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val json = prefs.getString(KEY_PENDING_PROFILE_JSON, null)
+                if (json.isNullOrEmpty()) {
+                    null
+                } else {
+                    prefs.edit().remove(KEY_PENDING_PROFILE_JSON).apply()
+                    JSONObject(json)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Failed to read pending profile: ${e.message}")
+                null
+            }
         }
     }
 

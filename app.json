@@ -35,7 +35,8 @@
       "permissions": [
         "INTERNET",
         "BIND_VPN_SERVICE",
-        "CAMERA"
+        "CAMERA",
+        "POST_NOTIFICATIONS"
       ]
     },
     "web": {
