@@ -134,6 +134,7 @@ jobs:
       - name: Build iOS Archive (Production - Unsigned for TrollStore)
         run: |
           cd ios
+          set -o pipefail
           xcodebuild \
             -workspace CBVVPN.xcworkspace \
             -scheme CBVVPN \
@@ -146,7 +147,10 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
-            clean archive
+            clean archive | tee "$PWD/build/xcodebuild.log"
+
+          echo "---- Xcode build errors (if any) ----"
+          rg -n "error:|fatal error:|clang: error:" "$PWD/build/xcodebuild.log" || true
 
       - name: Create Production IPA for TrollStore (No Signing)
         run: |
