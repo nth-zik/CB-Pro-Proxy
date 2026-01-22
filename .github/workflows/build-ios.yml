@@ -148,7 +148,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
-            clean archive | tee "$PWD/build/xcodebuild.log"
+            clean archive 2>&1 | tee "$PWD/build/xcodebuild.log"
           build_status=${PIPESTATUS[0]}
           set -e
 
