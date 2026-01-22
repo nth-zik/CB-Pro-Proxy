@@ -105,12 +105,6 @@ jobs:
         run: |
           gem install cocoapods -v '~> 1.16'
 
-      - name: Prebuild Expo iOS
-        run: |
-          echo "Starting Expo prebuild..."
-          npx expo prebuild --platform ios --clean
-          echo "Prebuild completed"
-
       - name: Verify iOS directory
         run: |
           echo "Checking iOS directory structure..."
@@ -118,7 +112,7 @@ jobs:
           echo "Checking for xcodeproj..."
           ls -la ios/*.xcodeproj/ || echo "No xcodeproj found"
           echo "Checking for xcworkspace..."
-          ls -la ios/*.xcworkspace/ || echo "No xcworkspace found yet"
+          ls -la ios/*.xcworkspace/ || echo "No xcworkspace found"
 
       - name: Install iOS dependencies
         run: |
@@ -128,21 +122,21 @@ jobs:
       - name: Verify workspace creation
         run: |
           cd ios
-          if [ ! -d "CBProProxy.xcworkspace" ]; then
-            echo "Error: CBProProxy.xcworkspace not found!"
+          if [ ! -d "CBVVPN.xcworkspace" ]; then
+            echo "Error: CBVVPN.xcworkspace not found!"
             echo "Contents of ios directory:"
             ls -la
             exit 1
           fi
           echo "Workspace found successfully"
-          ls -la CBProProxy.xcworkspace/
+          ls -la CBVVPN.xcworkspace/
 
       - name: Build iOS Archive (Production - Unsigned for TrollStore)
         run: |
           cd ios
           xcodebuild \
-            -workspace CBProProxy.xcworkspace \
-            -scheme CBProProxy \
+            -workspace CBVVPN.xcworkspace \
+            -scheme CBVVPN \
             -configuration Release \
             -archivePath "$PWD/build/CBProProxy.xcarchive" \
             -sdk iphoneos \
@@ -162,8 +156,8 @@ jobs:
           mkdir -p "$PWD/build/output/Payload"
 
           # Copy the .app from archive to Payload
-          if [ -d "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBProProxy.app" ]; then
-            cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBProProxy.app" "$PWD/build/output/Payload/"
+          if [ -d "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" ]; then
+            cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" "$PWD/build/output/Payload/"
           else
             echo "Error: App not found in archive"
             ls -la "$PWD/build/CBProProxy.xcarchive/Products/Applications/" || true
@@ -171,8 +165,8 @@ jobs:
           fi
 
           # Remove code signature (important for TrollStore)
-          rm -rf "$PWD/build/output/Payload/CBProProxy.app/_CodeSignature" || true
-          rm -f "$PWD/build/output/Payload/CBProProxy.app/embedded.mobileprovision" || true
+          rm -rf "$PWD/build/output/Payload/CBVVPN.app/_CodeSignature" || true
+          rm -f "$PWD/build/output/Payload/CBVVPN.app/embedded.mobileprovision" || true
 
           # Create IPA
           cd "$PWD/build/output"
