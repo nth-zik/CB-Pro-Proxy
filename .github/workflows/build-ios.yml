@@ -8,13 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Optional version to use (e.g. 1.2.3). If provided, this overrides tag-based version.'
+        description: "Optional version to use (e.g. 1.2.3). If provided, this overrides tag-based version."
         required: false
-        default: ''
+        default: ""
       release_notes:
-        description: 'Release notes to include in the GitHub Release'
+        description: "Release notes to include in the GitHub Release"
         required: false
-        default: ''
+        default: ""
 
 permissions:
   contents: write
@@ -34,7 +34,7 @@ jobs:
         run: |
           echo "Recent tags:"
           git tag --sort=-v:refname | head -n 5
-          
+
           if [[ "${{ github.ref }}" == "refs/tags/"* ]]; then
             CURRENT_REF="${{ github.ref_name }}"
             PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_REF}^" 2>/dev/null || echo "")
@@ -44,7 +44,7 @@ jobs:
           fi
 
           echo "Generating notes from '$PREVIOUS_TAG' to '$CURRENT_REF'"
-          
+
           if [[ -z "$PREVIOUS_TAG" ]]; then
             echo "No previous tag found. Getting last 20 commits."
             COMMITS=$(git log -n 20 --pretty=format:"- %s (%h)" "$CURRENT_REF")
@@ -98,7 +98,7 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2'
+          ruby-version: "3.2"
           bundler-cache: false
 
       - name: Install CocoaPods
@@ -110,7 +110,7 @@ jobs:
           echo "Starting Expo prebuild..."
           npx expo prebuild --platform ios --clean
           echo "Prebuild completed"
-          
+
       - name: Verify iOS directory
         run: |
           echo "Checking iOS directory structure..."
@@ -119,12 +119,12 @@ jobs:
           ls -la ios/*.xcodeproj/ || echo "No xcodeproj found"
           echo "Checking for xcworkspace..."
           ls -la ios/*.xcworkspace/ || echo "No xcworkspace found yet"
-          
+
       - name: Install iOS dependencies
         run: |
           cd ios
           pod install --repo-update
-          
+
       - name: Verify workspace creation
         run: |
           cd ios
@@ -137,7 +137,7 @@ jobs:
           echo "Workspace found successfully"
           ls -la CBProProxy.xcworkspace/
 
-      - name: Build iOS Archive (Unsigned)
+      - name: Build iOS Archive (Production - Unsigned for TrollStore)
         run: |
           cd ios
           xcodebuild \
@@ -146,63 +146,50 @@ jobs:
             -configuration Release \
             -archivePath "$PWD/build/CBProProxy.xcarchive" \
             -sdk iphoneos \
-            CODE_SIGN_IDENTITY="" \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
             clean archive
 
-      - name: Export IPA (Unsigned)
+      - name: Create Production IPA for TrollStore (No Signing)
         run: |
           cd ios
-          
-          # Create export options plist for ad-hoc distribution (production build)
-          cat > ExportOptions.plist << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>ad-hoc</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>compileBitcode</key>
-            <false/>
-            <key>stripSwiftSymbols</key>
-            <true/>
-            <key>uploadSymbols</key>
-            <false/>
-          </dict>
-          </plist>
-          EOF
-          
-          xcodebuild \
-            -exportArchive \
-            -archivePath "$PWD/build/CBProProxy.xcarchive" \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath "$PWD/build/output" \
-            -allowProvisioningUpdates \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO || true
-          
-          # If export fails (common for unsigned), extract the app from archive
-          if [ ! -f "$PWD/build/output/CBProProxy.ipa" ]; then
-            echo "Export failed, creating IPA manually from archive..."
-            mkdir -p "$PWD/build/output/Payload"
+
+          echo "Creating production IPA from archive for TrollStore..."
+          mkdir -p "$PWD/build/output/Payload"
+
+          # Copy the .app from archive to Payload
+          if [ -d "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBProProxy.app" ]; then
             cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBProProxy.app" "$PWD/build/output/Payload/"
-            cd "$PWD/build/output"
-            zip -r CBProProxy.ipa Payload
-            rm -rf Payload
+          else
+            echo "Error: App not found in archive"
+            ls -la "$PWD/build/CBProProxy.xcarchive/Products/Applications/" || true
+            exit 1
           fi
+
+          # Remove code signature (important for TrollStore)
+          rm -rf "$PWD/build/output/Payload/CBProProxy.app/_CodeSignature" || true
+          rm -f "$PWD/build/output/Payload/CBProProxy.app/embedded.mobileprovision" || true
+
+          # Create IPA
+          cd "$PWD/build/output"
+          zip -r CBProProxy.ipa Payload
+          rm -rf Payload
+
+          echo "Production IPA created successfully for TrollStore"
+          ls -lh CBProProxy.ipa
 
       - name: Rename IPA with version
         run: |
           cd ios/build/output
-          mv CBProProxy.ipa "CBProProxy-unsigned-${{ steps.version.outputs.version }}-${{ github.run_number }}.ipa"
+          mv CBProProxy.ipa "CBProProxy-production-trollstore-${{ steps.version.outputs.version }}-${{ github.run_number }}.ipa"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-unsigned-ipa
+          name: ios-production-trollstore-ipa
           path: ios/build/output/*.ipa
           retention-days: 30
