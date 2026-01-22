@@ -135,6 +135,7 @@ jobs:
         run: |
           cd ios
           set -o pipefail
+          set +e
           xcodebuild \
             -workspace CBVVPN.xcworkspace \
             -scheme CBVVPN \
@@ -148,9 +149,14 @@ jobs:
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
             clean archive | tee "$PWD/build/xcodebuild.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
 
           echo "---- Xcode build errors (if any) ----"
           rg -n "error:|fatal error:|clang: error:" "$PWD/build/xcodebuild.log" || true
+          echo "---- Xcode build tail (last 200 lines) ----"
+          tail -n 200 "$PWD/build/xcodebuild.log" || true
+          exit $build_status
 
       - name: Create Production IPA for TrollStore (No Signing)
         run: |
