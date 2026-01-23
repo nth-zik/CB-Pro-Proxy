@@ -123,6 +123,25 @@ class VPNModule: RCTEventEmitter {
     }
   }
 
+  private func waitForDisconnect(
+    _ manager: NETunnelProviderManager,
+    attempts: Int,
+    completion: @escaping () -> Void
+  ) {
+    guard attempts > 0 else {
+      completion()
+      return
+    }
+    if manager.connection.status == .disconnected {
+      completion()
+      return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+      guard self != nil else { return }
+      self?.waitForDisconnect(manager, attempts: attempts - 1, completion: completion)
+    }
+  }
+
   private func waitForReady(_ connection: NWConnection, timeout: TimeInterval) -> Error? {
     let semaphore = DispatchSemaphore(value: 0)
     var resultError: Error?
@@ -654,54 +673,64 @@ class VPNModule: RCTEventEmitter {
         self?.setErrorState(message)
         reject("VPN_MANAGER_ERROR", message, error)
       case .success(let manager):
+        var forceReconnect = false
+        let startWithProfile = {
+          self?.configureManager(manager, profile: profile) { error in
+            if let error {
+              let message = self?.formatError(error as NSError) ?? error.localizedDescription
+              self?.setErrorState(message)
+              reject("VPN_CONFIG_ERROR", message, error)
+              return
+            }
+            manager.loadFromPreferences { loadError in
+              if let loadError {
+                let message = self?.formatError(loadError as NSError) ?? loadError.localizedDescription
+                self?.setErrorState(message)
+                reject("VPN_LOAD_ERROR", message, loadError)
+                return
+              }
+              let status = manager.connection.status
+              if !forceReconnect && (status == .connected || status == .connecting || status == .reasserting) {
+                self?.updateCachedStatus(status)
+                self?.emitStatusChanged()
+                resolve(NSNull())
+                return
+              }
+              self?.startTunnel(
+                manager,
+                retryOnStale: true,
+                resolve: resolve,
+                reject: reject
+              )
+
+              DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let self else { return }
+                self.updateCachedStatus(manager.connection.status)
+                if manager.connection.status == .disconnected {
+                  self.reportLastDisconnectError(manager)
+                  if self.cachedStatusState != "error" {
+                    self.setErrorState("VPN did not start. Check Network Extension entitlements and provisioning.")
+                  }
+                }
+                self.emitStatusChanged()
+              }
+            }
+          }
+        }
+
         let status = manager.connection.status
         if status == .connected || status == .connecting || status == .reasserting {
-          self?.updateCachedStatus(status)
+          forceReconnect = true
+          manager.connection.stopVPNTunnel()
+          self?.updateCachedStatus(manager.connection.status)
           self?.emitStatusChanged()
-          resolve(NSNull())
+          self?.waitForDisconnect(manager, attempts: 10) {
+            startWithProfile()
+          }
           return
         }
-        self?.configureManager(manager, profile: profile) { error in
-          if let error {
-            let message = self?.formatError(error as NSError) ?? error.localizedDescription
-            self?.setErrorState(message)
-            reject("VPN_CONFIG_ERROR", message, error)
-            return
-          }
-          manager.loadFromPreferences { loadError in
-            if let loadError {
-              let message = self?.formatError(loadError as NSError) ?? loadError.localizedDescription
-              self?.setErrorState(message)
-              reject("VPN_LOAD_ERROR", message, loadError)
-              return
-            }
-            let status = manager.connection.status
-            if status == .connected || status == .connecting || status == .reasserting {
-              self?.updateCachedStatus(status)
-              self?.emitStatusChanged()
-              resolve(NSNull())
-              return
-            }
-            self?.startTunnel(
-              manager,
-              retryOnStale: true,
-              resolve: resolve,
-              reject: reject
-            )
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
-              guard let self else { return }
-              self.updateCachedStatus(manager.connection.status)
-              if manager.connection.status == .disconnected {
-                self.reportLastDisconnectError(manager)
-                if self.cachedStatusState != "error" {
-                  self.setErrorState("VPN did not start. Check Network Extension entitlements and provisioning.")
-                }
-              }
-              self.emitStatusChanged()
-            }
-          }
-        }
+        startWithProfile()
       }
     }
   }

@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
 import { VPNModule, VPNModuleEmitter } from "../native";
 import { VPNStatusInfo } from "../types";
 import { useVPNStore } from "../store";
+import { storageService } from "../services/StorageService";
 import { useLogger } from "./useLogger";
 
 /**
@@ -21,6 +22,7 @@ export const useVPNEvents = () => {
   const { logInfo, logError, logDebug, logWarn } = useLogger({
     defaultCategory: "vpn",
   });
+  const lastAutoConnectRef = useRef<{ id: string; at: number } | null>(null);
 
   useEffect(() => {
     logDebug("Setting up VPN event listeners");
@@ -81,6 +83,55 @@ export const useVPNEvents = () => {
           type: payload?.type,
           isUpdate: payload?.isUpdate,
         });
+
+        const profileId = payload?.id;
+        if (!profileId) {
+          return;
+        }
+
+        const now = Date.now();
+        if (
+          lastAutoConnectRef.current?.id === profileId &&
+          now - lastAutoConnectRef.current.at < 3000
+        ) {
+          return;
+        }
+        lastAutoConnectRef.current = { id: profileId, at: now };
+
+        try {
+          const profile =
+            (await storageService.getProfileWithCredentials(profileId)) || null;
+          if (!profile) {
+            logWarn("Auto-connect skipped: profile not found", undefined, {
+              profileId,
+            });
+            return;
+          }
+
+          await selectProfile(profile.id);
+          setVPNStatus("connecting");
+          await VPNModule.startVPNWithProfile(
+            profile.name,
+            profile.host,
+            profile.port,
+            profile.type,
+            profile.username || "",
+            profile.password || "",
+            profile.dns1,
+            profile.dns2
+          );
+          logInfo("Auto-connecting after profile update", undefined, {
+            profileId: profile.id,
+            profileName: profile.name,
+          });
+        } catch (error) {
+          logError(
+            "Failed to auto-connect after profile update",
+            undefined,
+            error as Error,
+            { profileId }
+          );
+        }
       }
     );
 

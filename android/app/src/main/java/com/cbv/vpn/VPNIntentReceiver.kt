@@ -76,9 +76,9 @@ class VPNIntentReceiver : BroadcastReceiver() {
             // Stop existing VPN connection first to avoid stale tunnels
             Log.d(TAG, "🛑 Stopping any existing VPN connection...")
             val stopIntent = Intent(context, VPNConnectionService::class.java)
-            stopIntent.putExtra("action", "stop")
-            // Use context.stopService instead of startService to avoid background service restrictions
-            context.stopService(stopIntent)
+            stopIntent.putExtra("action", VPNConnectionService.COMMAND_STOP)
+            stopIntent.putExtra("force", true)
+            context.startService(stopIntent)
 
             // Wait a moment for the stop to complete
             Thread.sleep(500)
@@ -134,6 +134,7 @@ class VPNIntentReceiver : BroadcastReceiver() {
             serviceIntent.putExtra("password", profile.optString("password", ""))
             serviceIntent.putExtra("dns1", profile.optString("dns1", "1.1.1.1"))
             serviceIntent.putExtra("dns2", profile.optString("dns2", "8.8.8.8"))
+            serviceIntent.putExtra("force_restart", true)
 
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

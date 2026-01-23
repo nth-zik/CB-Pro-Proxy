@@ -390,6 +390,8 @@ class VPNModule(reactContext: ReactApplicationContext) :
                     "🚀 Starting VPN service with profile: ${profile.optString("name", "Unknown")}"
             )
 
+            stopExistingVPNForRestart()
+
             // Save this profile as the last connected profile for auto-connect
             setLastConnectedProfileId(profileId)
 
@@ -483,6 +485,8 @@ class VPNModule(reactContext: ReactApplicationContext) :
             }
 
             Log.d(TAG, "🚀 Starting VPN service with profile: $name")
+
+            stopExistingVPNForRestart()
 
             // Clear manually disconnected flag when starting VPN
             val prefs =
@@ -589,6 +593,19 @@ class VPNModule(reactContext: ReactApplicationContext) :
     }
 
     @ReactMethod fun removeListeners(count: Int) {}
+
+    private fun stopExistingVPNForRestart() {
+        try {
+            Log.d(TAG, "🛑 Stopping existing VPN before reconnect")
+            val stopIntent = Intent(reactApplicationContext, VPNConnectionService::class.java)
+            stopIntent.putExtra("action", VPNConnectionService.COMMAND_STOP)
+            stopIntent.putExtra("force", true)
+            reactApplicationContext.startService(stopIntent)
+            Thread.sleep(500)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to stop VPN before reconnect: ${e.message}")
+        }
+    }
 
     private fun startVPNService(profile: JSONObject) {
         Log.d(TAG, "========================================")

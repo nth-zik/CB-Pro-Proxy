@@ -231,12 +231,36 @@ class VPNConnectionService : VpnService() {
                 loadPowerProfileConfig()
                 return START_NOT_STICKY
             }
-            proxyServer = intent.getStringExtra("server") ?: ""
-            proxyServerIP = intent.getStringExtra("serverIP") ?: proxyServer
-            proxyPort = intent.getIntExtra("port", 0)
-            proxyUsername = intent.getStringExtra("username") ?: ""
-            proxyPassword = intent.getStringExtra("password") ?: ""
-            proxyType = intent.getStringExtra("type") ?: "socks5"
+            val nextServer = intent.getStringExtra("server") ?: ""
+            val nextServerIP = intent.getStringExtra("serverIP") ?: nextServer
+            val nextPort = intent.getIntExtra("port", 0)
+            val nextUsername = intent.getStringExtra("username") ?: ""
+            val nextPassword = intent.getStringExtra("password") ?: ""
+            val nextType = intent.getStringExtra("type") ?: "socks5"
+
+            val forceRestart = intent.getBooleanExtra("force_restart", false)
+            val shouldRestart =
+                    (forceRestart && isRunning) ||
+                            (isRunning &&
+                                    (proxyServer != nextServer ||
+                                            proxyServerIP != nextServerIP ||
+                                            proxyPort != nextPort ||
+                                            proxyUsername != nextUsername ||
+                                            proxyPassword != nextPassword ||
+                                            proxyType != nextType))
+
+            if (shouldRestart) {
+                Log.w(TAG, "🔄 Restarting VPN due to proxy profile change")
+                stopVPNInternal()
+                Thread.sleep(500)
+            }
+
+            proxyServer = nextServer
+            proxyServerIP = nextServerIP
+            proxyPort = nextPort
+            proxyUsername = nextUsername
+            proxyPassword = nextPassword
+            proxyType = nextType
 
             Log.d(TAG, "Starting VPN with proxy: $proxyType://$proxyServer:$proxyPort")
 
