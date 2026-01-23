@@ -105,6 +105,11 @@ jobs:
         run: |
           gem install cocoapods -v '~> 1.16'
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
       - name: Verify iOS directory
         run: |
           echo "Checking iOS directory structure..."

@@ -219,6 +219,11 @@ jobs:
       - name: Install CocoaPods
         run: gem install cocoapods -v '~> 1.16'
 
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
       - name: Install iOS dependencies
         run: |
           cd ios
