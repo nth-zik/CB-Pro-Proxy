@@ -83,34 +83,53 @@ class TCPConnection(
     }
 
     private fun createBypassedSocket(): Pair<Socket, Boolean> {
+        val defaultSocket = Socket()
+        val protected = protectSocket(defaultSocket)
+        if (protected) {
+            Log.d(TAG, "   Using protected default socket")
+            return defaultSocket to true
+        }
+
         val connectivityManager = vpnService.getSystemService(ConnectivityManager::class.java)
         val networks = connectivityManager?.allNetworks ?: emptyArray()
+        val candidates = mutableListOf<Pair<Network, NetworkCapabilities>>()
         for (network in networks) {
+            val caps = connectivityManager?.getNetworkCapabilities(network) ?: continue
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) continue
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue
+            candidates.add(network to caps)
+        }
+
+        val sorted = candidates.sortedWith(
+            compareByDescending<Pair<Network, NetworkCapabilities>> { it.second.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) }
+                .thenByDescending { it.second.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) }
+                .thenByDescending { it.second.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) }
+                .thenByDescending { it.second.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) }
+        )
+
+        for ((network, caps) in sorted) {
             try {
-                val caps = connectivityManager?.getNetworkCapabilities(network)
-                if (caps != null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-                    val socket = network.socketFactory.createSocket()
-                    if (socket != null) {
-                        val transports = buildList {
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("cellular")
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("wifi")
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("ethernet")
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)) add("bluetooth")
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("vpn")
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_LOWPAN)) add("lowpan")
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI_AWARE)) add("wifi_aware")
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_USB)) add("usb")
-                        }.joinToString(",")
-                        Log.d(TAG, "   Created socket on network: $network transports=[$transports]")
-                        return socket to true
-                    }
-                }
+                val socket = network.socketFactory.createSocket()
+                val transports = buildList {
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("cellular")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("wifi")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("ethernet")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)) add("bluetooth")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("vpn")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_LOWPAN)) add("lowpan")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI_AWARE)) add("wifi_aware")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_USB)) add("usb")
+                }.joinToString(",")
+                val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                Log.d(TAG, "   Created socket on network: $network transports=[$transports] validated=$validated")
+                return socket to true
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Failed to create socket on network $network: ${e.message}")
             }
         }
-        Log.w(TAG, "⚠️ Falling back to default Socket (may require protect())")
-        return Socket() to false
+
+        Log.w(TAG, "⚠️ Falling back to default Socket without protection")
+        return defaultSocket to false
     }
 
     private fun protectSocket(socket: Socket?): Boolean {
@@ -149,16 +168,10 @@ class TCPConnection(
         
         Log.d(TAG, "   Socket created: bound=${socket?.isBound}, connected=${socket?.isConnected}")
         Log.d(TAG, "   VpnService: ${vpnService.javaClass.simpleName}")
-        
-        val protected = if (socketBypassedVpn) {
-            Log.d(TAG, "   Socket created on non-VPN network, skipping protect()")
-            true
-        } else {
-            protectSocket(socket)
-        }
-        Log.d(TAG, "   protect() result: $protected")
-        if (!protected) {
-            Log.w(TAG, "⚠️ Socket protection failed - connection will loop through VPN")
+
+        Log.d(TAG, "   protect() result: $socketBypassedVpn")
+        if (!socketBypassedVpn) {
+            Log.w(TAG, "⚠️ Socket is not protected - connection may loop through VPN")
         } else {
             Log.d(TAG, "✅ Socket ready in handleSYN")
         }

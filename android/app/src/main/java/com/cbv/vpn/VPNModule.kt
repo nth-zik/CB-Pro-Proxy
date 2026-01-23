@@ -1,13 +1,16 @@
 package com.cbv.vpn
 
+import android.Manifest
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.facebook.react.bridge.*
 import com.facebook.react.modules.core.DeviceEventManagerModule
@@ -152,6 +155,26 @@ class VPNModule(reactContext: ReactApplicationContext) :
         LocalBroadcastManager.getInstance(reactContext)
                 .registerReceiver(profilesUpdatedReceiver, profileFilter)
         Log.d(TAG, "📡 VPN status receiver registered")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            try {
+                val prefs =
+                        reactApplicationContext.getSharedPreferences("vpn_prefs", Context.MODE_PRIVATE)
+                val pending = prefs.getBoolean("notification_permission_pending", false)
+                if (pending) {
+                    val granted =
+                            ContextCompat.checkSelfPermission(
+                                    reactApplicationContext,
+                                    Manifest.permission.POST_NOTIFICATIONS
+                            ) == PackageManager.PERMISSION_GRANTED
+                    if (!granted) {
+                        sendEvent("notificationPermissionRequired", Arguments.createMap())
+                    }
+                    prefs.edit().putBoolean("notification_permission_pending", false).apply()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to check pending notification permission: ${e.message}")
+            }
+        }
         requestStatusRefresh()
     }
 

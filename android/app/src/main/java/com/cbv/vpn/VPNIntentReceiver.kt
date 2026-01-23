@@ -60,6 +60,19 @@ class VPNIntentReceiver : BroadcastReceiver() {
             val profileId = profile.getString("id")
             val proxyHost = profile.getString("host")
 
+            // Save this profile as the selected/active profile early
+            prefs.edit().putString("selected_profile_id", profileId).apply()
+            Log.d(TAG, "💾 Saved active profile: $profileId")
+
+            // Broadcast active profile change to React Native
+            val activeProfileIntent =
+                    Intent("com.cbv.vpn.ACTIVE_PROFILE_CHANGED").apply {
+                        putExtra("profile_id", profileId)
+                        putExtra("profile_name", profile.getString("name"))
+                    }
+            LocalBroadcastManager.getInstance(context).sendBroadcast(activeProfileIntent)
+            Log.d(TAG, "📡 Broadcasted active profile change")
+
             // Stop existing VPN connection first to avoid stale tunnels
             Log.d(TAG, "🛑 Stopping any existing VPN connection...")
             val stopIntent = Intent(context, VPNConnectionService::class.java)
@@ -78,6 +91,7 @@ class VPNIntentReceiver : BroadcastReceiver() {
                                 android.Manifest.permission.POST_NOTIFICATIONS
                         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
                 if (!notifGranted) {
+                    prefs.edit().putBoolean("notification_permission_pending", true).apply()
                     Log.w(
                             TAG,
                             "⚠️ POST_NOTIFICATIONS not granted, bringing app to foreground to request"
@@ -97,20 +111,8 @@ class VPNIntentReceiver : BroadcastReceiver() {
                     }
                     return
                 }
+                prefs.edit().putBoolean("notification_permission_pending", false).apply()
             }
-
-            // Save this profile as the selected/active profile
-            prefs.edit().putString("selected_profile_id", profileId).apply()
-            Log.d(TAG, "💾 Saved active profile: $profileId")
-
-            // Broadcast active profile change to React Native
-            val activeProfileIntent =
-                    Intent("com.cbv.vpn.ACTIVE_PROFILE_CHANGED").apply {
-                        putExtra("profile_id", profileId)
-                        putExtra("profile_name", profile.getString("name"))
-                    }
-            LocalBroadcastManager.getInstance(context).sendBroadcast(activeProfileIntent)
-            Log.d(TAG, "📡 Broadcasted active profile change")
 
             Log.d(TAG, "🌐 Resolving proxy hostname: $proxyHost")
 

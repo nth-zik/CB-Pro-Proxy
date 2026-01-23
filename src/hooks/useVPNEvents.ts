@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { PermissionsAndroid, Platform } from "react-native";
 import { VPNModule, VPNModuleEmitter } from "../native";
 import { VPNStatusInfo } from "../types";
-import { usePowerProfileStore, useVPNStore, POWER_PROFILES } from "../store";
+import { useVPNStore } from "../store";
 import { useLogger } from "./useLogger";
 
 /**
@@ -12,56 +12,15 @@ export const useVPNEvents = () => {
   const {
     vpnStatus,
     setVPNStatus,
-    setPublicIp,
     setError,
     loadProfiles,
     setProfileNotification,
     profiles,
     selectProfile,
   } = useVPNStore();
-  const currentPowerProfile = usePowerProfileStore(
-    (state) => state.currentProfile
-  );
   const { logInfo, logError, logDebug, logWarn } = useLogger({
     defaultCategory: "vpn",
   });
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const intervalMs =
-      POWER_PROFILES[currentPowerProfile].publicIpCheckIntervalMs;
-
-    const fetchPublicIp = async () => {
-      try {
-        const response = await fetch("https://api.ipify.org?format=json", {
-          method: "GET",
-          headers: { "Cache-Control": "no-cache" },
-        });
-        if (!response.ok) {
-          throw new Error(`Public IP fetch failed: ${response.status}`);
-        }
-        const data = (await response.json()) as { ip?: string };
-        if (data?.ip) {
-          setPublicIp(data.ip);
-        }
-      } catch (error) {
-        logDebug("Public IP fetch failed", undefined, error as Error);
-      }
-    };
-
-    if (vpnStatus === "connected") {
-      fetchPublicIp();
-      timer = setInterval(fetchPublicIp, intervalMs);
-    } else {
-      setPublicIp(null);
-    }
-
-    return () => {
-      if (timer) {
-        clearInterval(timer);
-      }
-    };
-  }, [vpnStatus, currentPowerProfile, setPublicIp, logDebug]);
 
   useEffect(() => {
     logDebug("Setting up VPN event listeners");

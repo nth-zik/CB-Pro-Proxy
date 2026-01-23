@@ -152,6 +152,10 @@ class VPNConnectionService : VpnService() {
         if (!notifAllowed) {
             Log.e(TAG, "Cannot start foreground: notification permission missing")
             try {
+                val prefs = getSharedPreferences("vpn_prefs", MODE_PRIVATE)
+                prefs.edit().putBoolean("notification_permission_pending", true).apply()
+            } catch (_: Exception) {}
+            try {
                 broadcastStatus(
                         STATUS_DISCONNECTED,
                         force = true,
