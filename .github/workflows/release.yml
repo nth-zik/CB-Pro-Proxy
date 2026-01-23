@@ -219,27 +219,33 @@ jobs:
       - name: Install CocoaPods
         run: gem install cocoapods -v '~> 1.16'
 
-      - name: Prebuild Expo iOS
-        run: |
-          npx expo prebuild --platform ios --clean
-          
       - name: Install iOS dependencies
         run: |
           cd ios
           pod install --repo-update
 
+      - name: Update iOS Info.plist versions
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.prepare.outputs.version }}" ios/CBVVPN/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" ios/CBVVPN/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.prepare.outputs.version }}" ios/CBVVPNProxyExtension/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" ios/CBVVPNProxyExtension/Info.plist
+
       - name: Build iOS Archive (Unsigned)
         run: |
           cd ios
           xcodebuild \
-            -workspace CBProProxy.xcworkspace \
-            -scheme CBProProxy \
+            -workspace CBVVPN.xcworkspace \
+            -scheme CBVVPN \
             -configuration Release \
             -archivePath "$PWD/build/CBProProxy.xcarchive" \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
             clean archive
 
       - name: Export IPA (Unsigned)
@@ -249,7 +255,12 @@ jobs:
           # Create IPA manually from archive
           echo "Creating IPA from archive..."
           mkdir -p "$PWD/build/output/Payload"
-          cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBProProxy.app" "$PWD/build/output/Payload/"
+          cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" "$PWD/build/output/Payload/"
+
+          # Remove code signatures and provisioning profiles (for unsigned install)
+          find "$PWD/build/output/Payload/CBVVPN.app" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
+          find "$PWD/build/output/Payload/CBVVPN.app" -name "embedded.mobileprovision" -type f -exec rm -f {} +
+
           cd "$PWD/build/output"
           zip -r CBProProxy.ipa Payload
           rm -rf Payload

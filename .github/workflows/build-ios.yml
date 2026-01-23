@@ -119,6 +119,13 @@ jobs:
           cd ios
           pod install --repo-update
 
+      - name: Update iOS Info.plist versions
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" ios/CBVVPN/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" ios/CBVVPN/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" ios/CBVVPNProxyExtension/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" ios/CBVVPNProxyExtension/Info.plist
+
       - name: Verify workspace creation
         run: |
           cd ios
@@ -143,7 +150,7 @@ jobs:
             -archivePath "$PWD/build/CBProProxy.xcarchive" \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
@@ -174,9 +181,9 @@ jobs:
             exit 1
           fi
 
-          # Remove code signature (important for TrollStore)
-          rm -rf "$PWD/build/output/Payload/CBVVPN.app/_CodeSignature" || true
-          rm -f "$PWD/build/output/Payload/CBVVPN.app/embedded.mobileprovision" || true
+          # Remove code signatures and provisioning profiles (important for unsigned installs)
+          find "$PWD/build/output/Payload/CBVVPN.app" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
+          find "$PWD/build/output/Payload/CBVVPN.app" -name "embedded.mobileprovision" -type f -exec rm -f {} +
 
           # Create IPA
           cd "$PWD/build/output"
