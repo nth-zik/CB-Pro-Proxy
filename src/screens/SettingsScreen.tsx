@@ -38,6 +38,7 @@ import { VPNModule } from "../native/VPNModule";
 import Constants from "expo-constants";
 import { useOnboardingStore } from "../store/onboardingStore";
 import { usePowerProfileStore, POWER_PROFILE_INFO, type PowerProfile } from "../store/powerProfileStore";
+import { useAppSettingsStore } from "../store/appSettingsStore";
 
 interface SettingsScreenProps {
   navigation?: any;
@@ -57,10 +58,16 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
   // Power profile state
   const { currentProfile, setProfile, loadProfile } = usePowerProfileStore();
+  const {
+    autoSwitchUnhealthy,
+    isLoading: isLoadingAutoSwitch,
+    loadSettings: loadAppSettings,
+    setAutoSwitchUnhealthy,
+  } = useAppSettingsStore();
 
   // Load auto-connect preference and app version on mount
   useEffect(() => {
-    const loadSettings = async () => {
+    const initializeSettings = async () => {
       try {
         // Load auto-connect preference
         const enabled = await VPNModule.getAutoConnectEnabled();
@@ -81,10 +88,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       }
     };
 
-    loadSettings();
+    initializeSettings();
+    loadAppSettings();
     loadProfile(); // Load power profile on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modal]); // loadProfile is stable from zustand, no need in deps
+  }, [modal, loadAppSettings]); // loadProfile is stable from zustand, no need in deps
 
   // Handle auto-connect toggle
   const handleAutoConnectChange = useCallback(
@@ -100,6 +108,18 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
       }
     },
     [modal]
+  );
+
+  const handleAutoSwitchUnhealthyChange = useCallback(
+    async (value: boolean) => {
+      try {
+        await setAutoSwitchUnhealthy(value);
+      } catch (error) {
+        console.error("Failed to save auto-switch preference:", error);
+        modal.showError("Error", "Failed to save auto-switch setting");
+      }
+    },
+    [modal, setAutoSwitchUnhealthy]
   );
 
   // Open system VPN settings
@@ -376,6 +396,18 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 />
               </>
             )}
+            <ThemedDivider />
+            <ThemedSettingRow
+              title="Auto-switch Unhealthy Proxy"
+              subtitle="Switch to a healthy profile when the active proxy fails"
+              rightContent={
+                <ThemedSwitch
+                  value={autoSwitchUnhealthy}
+                  onValueChange={handleAutoSwitchUnhealthyChange}
+                  disabled={isLoadingAutoSwitch}
+                />
+              }
+            />
             <ThemedDivider />
             <ThemedSettingRow
               title="Notifications"

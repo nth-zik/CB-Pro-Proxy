@@ -19,6 +19,7 @@ import { useThemedStyles } from "../hooks/useThemedStyles";
 import { useTheme } from "../hooks/useTheme";
 import { storageService } from "../services/StorageService";
 import type { Theme } from "../types/theme";
+import { useProxyHealthStore } from "../store/proxyHealthStore";
 
 interface ConnectionScreenProps {
   navigation: any;
@@ -41,6 +42,10 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
     setVPNStatus,
     setError,
   } = useVPNStore();
+  const activeHealth = useProxyHealthStore((s) =>
+    activeProfileId ? s.health[activeProfileId] : undefined
+  );
+  const enqueueHealthCheck = useProxyHealthStore((s) => s.enqueueCheck);
 
   const [alertConfig, setAlertConfig] = useState<{
     visible: boolean;
@@ -59,6 +64,14 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
   });
 
   const [isConnectingLocal, setIsConnectingLocal] = useState(false);
+  const [isSpeedTesting, setIsSpeedTesting] = useState(false);
+  const [speedTestResult, setSpeedTestResult] = useState<{
+    downBps: number;
+    upBps: number;
+    ranAt: number;
+  } | null>(null);
+  const [speedTestError, setSpeedTestError] = useState<string | null>(null);
+  const speedTestInProgressRef = useRef(false);
 
   useEffect(() => {
     const requestNotificationPermission = async () => {
@@ -124,6 +137,12 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
     () => profiles.find((p) => p.id === activeProfileId),
     [profiles, activeProfileId]
   );
+
+  useEffect(() => {
+    if (activeProfile) {
+      enqueueHealthCheck(activeProfile);
+    }
+  }, [activeProfile?.id, enqueueHealthCheck]);
 
   const connectionState = useMemo(() => {
     const status = vpnStatus;
@@ -369,6 +388,150 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
     }`;
   };
 
+  const formatSpeedTestResult = () => {
+    if (!speedTestResult) return "Tap to test";
+    return `${formatRate(speedTestResult.downBps)} down / ${formatRate(
+      speedTestResult.upBps
+    )} up`;
+  };
+
+  const getHealthLabel = () => {
+    switch (activeHealth?.status) {
+      case "ok":
+        return "Healthy";
+      case "fail":
+        return "Unhealthy";
+      case "checking":
+        return "Checking";
+      case "unsupported":
+        return "Unsupported";
+      default:
+        return "Unknown";
+    }
+  };
+
+  const getHealthColor = () => {
+    switch (activeHealth?.status) {
+      case "ok":
+        return colors.status.success;
+      case "fail":
+        return colors.status.error;
+      case "checking":
+        return colors.status.warning;
+      case "unsupported":
+        return colors.text.tertiary;
+      default:
+        return colors.text.tertiary;
+    }
+  };
+
+  const withTimeout = async <T,>(
+    promise: Promise<T>,
+    timeoutMs: number
+  ): Promise<T> => {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error("Speed test timed out"));
+      }, timeoutMs);
+
+      promise
+        .then((result) => {
+          clearTimeout(timeoutId);
+          resolve(result);
+        })
+        .catch((err) => {
+          clearTimeout(timeoutId);
+          reject(err);
+        });
+    });
+  };
+
+  const getResponseByteLength = async (response: Response): Promise<number> => {
+    if (response.arrayBuffer) {
+      const buffer = await response.arrayBuffer();
+      return buffer.byteLength || 0;
+    }
+    if (response.blob) {
+      const blob = await response.blob();
+      return blob.size || 0;
+    }
+    const text = await response.text();
+    return text.length || 0;
+  };
+
+  const runSpeedTest = async () => {
+    if (isSpeedTesting || speedTestInProgressRef.current) {
+      return;
+    }
+
+    if (!isConnected) {
+      showAlert("VPN not connected", "Connect VPN before running speed test.", [
+        { text: "OK" },
+      ]);
+      return;
+    }
+
+    speedTestInProgressRef.current = true;
+    setIsSpeedTesting(true);
+    setSpeedTestError(null);
+
+    const downloadBytes = 2 * 1024 * 1024;
+    const uploadBytes = 512 * 1024;
+    const timeoutMs = 20000;
+
+    try {
+      const downloadResult = await withTimeout(
+        (async () => {
+          const url = `https://speed.cloudflare.com/__down?bytes=${downloadBytes}&cachebust=${Date.now()}`;
+          const start = Date.now();
+          const response = await fetch(url, {
+            method: "GET",
+            headers: { "Cache-Control": "no-cache" },
+          });
+          if (!response.ok) {
+            throw new Error(`Download failed (${response.status})`);
+          }
+          const bytes = await getResponseByteLength(response);
+          const durationMs = Math.max(1, Date.now() - start);
+          return { bps: (bytes / durationMs) * 1000 };
+        })(),
+        timeoutMs
+      );
+
+      const uploadResult = await withTimeout(
+        (async () => {
+          const url = "https://speed.cloudflare.com/__up";
+          const body = new ArrayBuffer(uploadBytes);
+          const start = Date.now();
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/octet-stream" },
+            body,
+          });
+          if (!response.ok) {
+            throw new Error(`Upload failed (${response.status})`);
+          }
+          const durationMs = Math.max(1, Date.now() - start);
+          return { bps: (uploadBytes / durationMs) * 1000 };
+        })(),
+        timeoutMs
+      );
+
+      setSpeedTestResult({
+        downBps: downloadResult.bps,
+        upBps: uploadResult.bps,
+        ranAt: Date.now(),
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Speed test failed";
+      setSpeedTestError(message);
+    } finally {
+      setIsSpeedTesting(false);
+      speedTestInProgressRef.current = false;
+    }
+  };
+
   const handleConnect = async () => {
     if (!activeProfile) {
       showAlert(
@@ -548,6 +711,39 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
               <Text style={styles.speedValue}>{formatRate(speeds.upBps)}</Text>
             </View>
           </View>
+          <View style={styles.speedTestRow}>
+            <View style={styles.speedTestInfo}>
+              <Text style={styles.speedTestLabel}>Speed Test</Text>
+              <Text style={styles.speedTestValue}>
+                {formatSpeedTestResult()}
+              </Text>
+              {speedTestError ? (
+                <Text style={styles.speedTestError}>{speedTestError}</Text>
+              ) : null}
+            </View>
+            <TouchableOpacity
+              style={[
+                styles.speedTestButton,
+                isSpeedTesting && styles.speedTestButtonDisabled,
+              ]}
+              onPress={runSpeedTest}
+              disabled={isSpeedTesting}
+              activeOpacity={0.8}
+            >
+              {isSpeedTesting ? (
+                <ActivityIndicator color={colors.text.inverse} size="small" />
+              ) : (
+                <Ionicons
+                  name="speedometer"
+                  size={18}
+                  color={colors.text.inverse}
+                />
+              )}
+              <Text style={styles.speedTestButtonText}>
+                {isSpeedTesting ? "Testing" : "Test"}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {activeProfile ? (
@@ -558,6 +754,15 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
               {activeProfile.type.toUpperCase()} • {activeProfile.host}:
               {activeProfile.port}
             </Text>
+            <View style={styles.healthRow}>
+              <View
+                style={[
+                  styles.healthDot,
+                  { backgroundColor: getHealthColor() },
+                ]}
+              />
+              <Text style={styles.healthText}>{getHealthLabel()}</Text>
+            </View>
             {activeProfile.username && (
               <View style={styles.profileAuth}>
                 <Ionicons
@@ -745,6 +950,51 @@ const createStyles = (theme: Theme) =>
       fontWeight: theme.typography.fontWeight.medium,
       color: theme.colors.text.primary,
     },
+    speedTestRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: theme.spacing.md,
+      gap: theme.spacing.sm,
+    },
+    speedTestInfo: {
+      flex: 1,
+    },
+    speedTestLabel: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.secondary,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      marginBottom: theme.spacing.xs,
+    },
+    speedTestValue: {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.medium,
+      color: theme.colors.text.primary,
+    },
+    speedTestError: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.status.error,
+      marginTop: theme.spacing.xs,
+    },
+    speedTestButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: theme.spacing.xs,
+      paddingVertical: theme.spacing.xs,
+      paddingHorizontal: theme.spacing.md,
+      borderRadius: theme.borderRadius.md,
+      backgroundColor: theme.colors.interactive.primary,
+    },
+    speedTestButtonText: {
+      color: theme.colors.text.inverse,
+      fontWeight: theme.typography.fontWeight.bold,
+      fontSize: theme.typography.fontSize.sm,
+    },
+    speedTestButtonDisabled: {
+      opacity: 0.7,
+    },
     profileInfo: {
       backgroundColor: theme.colors.background.secondary,
       borderRadius: theme.borderRadius.lg,
@@ -773,6 +1023,21 @@ const createStyles = (theme: Theme) =>
       fontSize: theme.typography.fontSize.sm,
       color: theme.colors.text.secondary,
       marginBottom: theme.spacing.xs,
+    },
+    healthRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.spacing.xs,
+      marginBottom: theme.spacing.sm,
+    },
+    healthDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+    },
+    healthText: {
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.secondary,
     },
     profileAuth: {
       flexDirection: "row",
