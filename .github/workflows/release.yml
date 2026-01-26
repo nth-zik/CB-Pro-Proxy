@@ -143,7 +143,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Build Android Release AAB (for Play Store)
-        if: github.event.inputs.deploy_to_playstore == 'true'
+        if: github.event.inputs.deploy_to_playstore == 'true' || contains(github.ref_name, 'store')
         run: |
           cd android
           ./gradlew bundleRelease --no-daemon
@@ -159,7 +159,7 @@ jobs:
              "build-output/cbv-vpn-v${{ needs.prepare.outputs.version }}.apk"
 
       - name: Copy AAB to output
-        if: github.event.inputs.deploy_to_playstore == 'true'
+        if: github.event.inputs.deploy_to_playstore == 'true' || contains(github.ref_name, 'store')
         run: |
           mkdir -p build-output
           cp android/app/build/outputs/bundle/release/app-release.aab \
@@ -173,7 +173,7 @@ jobs:
           retention-days: 5
 
       - name: Upload Android AAB artifact
-        if: github.event.inputs.deploy_to_playstore == 'true'
+        if: github.event.inputs.deploy_to_playstore == 'true' || contains(github.ref_name, 'store')
         uses: actions/upload-artifact@v4
         with:
           name: android-aab
@@ -396,7 +396,7 @@ jobs:
   deploy-playstore:
     needs: [prepare, build-android, create-release]
     runs-on: ubuntu-latest
-    if: github.event.inputs.deploy_to_playstore == 'true'
+    if: github.event.inputs.deploy_to_playstore == 'true' || contains(github.ref_name, 'store')
     timeout-minutes: 30
 
     steps:
