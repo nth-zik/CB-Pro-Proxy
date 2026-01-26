@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen.svg)](https://github.com/yourusername/cbv-vpn-app)
 [![Android Build](https://img.shields.io/badge/Android-Production%20Ready-success.svg)](https://github.com/yourusername/cbv-vpn-app)
-[![iOS Build](https://img.shields.io/badge/iOS-In%20Development-orange.svg)](https://github.com/yourusername/cbv-vpn-app)
+[![iOS Build](https://img.shields.io/badge/iOS-Production%20Ready-success.svg)](https://github.com/yourusername/cbv-vpn-app)
 [![React Native](https://img.shields.io/badge/React%20Native-0.81.5-blue.svg)](https://reactnative.dev/)
 [![Expo](https://img.shields.io/badge/Expo-~54.0-000020.svg)](https://expo.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
@@ -12,7 +12,7 @@
 
 **English documentation** — Vietnamese version available at [`README.vi.md`](./README.vi.md).
 
-CB Pro Proxy is an Expo-managed React Native application that provisions a local VPN interface and forwards traffic through SOCKS5 or HTTP proxies. The Android implementation ships with a fully native `VpnService` pipeline while the iOS Network Extension layer is under active development.
+CB Pro Proxy is an Expo-managed React Native application that provisions a local VPN interface and forwards traffic through SOCKS5 or HTTP proxies. Both Android and iOS implementations are production-ready with native `VpnService` (Android) and Network Extension (iOS) pipelines.
 
 ## Product Overview
 
@@ -85,7 +85,7 @@ Whether you're running Selenium tests, Appium scripts, or custom automation work
 - npm or Yarn Classic (Yarn Berry ≥2 requires `yarn add -D metro-minify-terser`)
 - Expo CLI (`npx expo`)
 - Android Studio (emulator, SDK platforms)
-- Xcode (for upcoming iOS Network Extension work)
+- Xcode (for iOS Network Extension)
 
 ---
 
@@ -125,7 +125,7 @@ cbv-vpn-app/
 │   ├── native/                # JS bridge to native module (`VPNModule.ts`)
 │   └── types/                 # Shared TypeScript definitions
 ├── android/                   # Native Android module & VpnService implementation
-├── ios/                       # Placeholder for Network Extension (coming soon)
+├── ios/                       # Native iOS module & Network Extension implementation
 ├── assets/                    # Icons & splash artwork
 └── app.json / package.json    # Expo & dependency configuration
 ```
@@ -220,12 +220,12 @@ cd android
 ./gradlew bundleRelease       # Generate AAB for Play Store
 ```
 
-### iOS (in progress)
+### iOS
 
 ```bash
 npx expo prebuild --platform ios
 cd ios
-open CBVVPN.xcworkspace       # Configure Network Extension in Xcode
+open CBVVPN.xcworkspace       # Build with Network Extension in Xcode
 ```
 
 ---
@@ -235,14 +235,14 @@ open CBVVPN.xcworkspace       # Configure Network Extension in Xcode
 - **React Native layer** — UI, profile management workflow, Zustand store, event-driven updates through `useVPNEvents`.
 - **Storage & security** — Profile metadata synced via `StorageService`, credentials isolated in secure storage.
 - **Native Android** — `VPNConnectionService` (derives from `VpnService`), packet routing, proxy clients, explicit broadcast receiver for automation, foreground notification for compliance.
-- **Native iOS** — Network Extension packet tunnel provider under construction; shares JS bridge contracts for parity.
+- **Native iOS** — Network Extension packet tunnel provider with go-tun2socks integration; shares JS bridge contracts for parity with Android.
 
 ---
 
 ## Development Status
 
 - **Android**: production-ready (`VpnService`, SOCKS5/HTTP tunnelling, broadcast automation, telemetry).
-- **iOS**: Network Extension + go-tun2socks integration scheduled.
+- **iOS**: production-ready (Network Extension, go-tun2socks integration, URL scheme automation).
 - **Roadmap**: enhanced error analytics, multi-proxy rotation, UI polish.
 
 Track ongoing work in `tasks.md` inside `.kiro/specs/` (private project planning).
