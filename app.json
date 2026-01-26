@@ -3,7 +3,7 @@
     "name": "CB Pro Proxy",
     "slug": "cbv-vpn-app",
     "scheme": "cbvproxy",
-    "version": "1.0.34",
+    "version": "1.0.35",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -22,7 +22,8 @@
         },
         "NSCameraUsageDescription": "This app needs camera access to scan QR codes for quick proxy import."
       },
-      "appleTeamId": "K5J34NK56Q"
+      "appleTeamId": "K5J34NK56Q",
+      "buildNumber": "1769422356"
     },
     "android": {
       "package": "com.cbv.vpn",
