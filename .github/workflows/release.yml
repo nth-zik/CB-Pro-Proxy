@@ -7,23 +7,23 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to use (e.g. 1.2.3). Required for manual runs.'
+        description: "Version to use (e.g. 1.2.3). Required for manual runs."
         required: true
-        default: ''
+        default: ""
       release_notes:
-        description: 'Release notes to include in the GitHub Release'
+        description: "Release notes to include in the GitHub Release"
         required: false
-        default: ''
+        default: ""
       deploy_to_playstore:
-        description: 'Deploy to Google Play Store after release'
+        description: "Deploy to Google Play Store after release"
         required: false
         type: boolean
         default: false
       playstore_track:
-        description: 'Play Store release track'
+        description: "Play Store release track"
         required: false
         type: choice
-        default: 'internal'
+        default: "internal"
         options:
           - internal
           - alpha
@@ -40,7 +40,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       release_notes: ${{ steps.release_notes.outputs.LOG }}
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
         run: |
           echo "Recent tags:"
           git tag --sort=-v:refname | head -n 5
-          
+
           if [[ "${{ github.ref }}" == "refs/tags/"* ]]; then
             CURRENT_REF="${{ github.ref_name }}"
             PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_REF}^" 2>/dev/null || echo "")
@@ -62,7 +62,7 @@ jobs:
           fi
 
           echo "Generating notes from '$PREVIOUS_TAG' to '$CURRENT_REF'"
-          
+
           if [[ -z "$PREVIOUS_TAG" ]]; then
             echo "No previous tag found. Getting last 20 commits."
             COMMITS=$(git log -n 20 --pretty=format:"- %s (%h)" "$CURRENT_REF")
@@ -95,7 +95,7 @@ jobs:
   build-android:
     needs: prepare
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -184,7 +184,7 @@ jobs:
   build-ios:
     needs: prepare
     runs-on: macos-15
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -213,7 +213,7 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2'
+          ruby-version: "3.2"
           bundler-cache: false
 
       - name: Install CocoaPods
@@ -222,7 +222,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22.x'
+          go-version: "1.22.x"
 
       - name: Install iOS dependencies
         run: |
@@ -261,12 +261,34 @@ jobs:
           echo "Creating unsigned IPA for AltStore/Sideloadly..."
           mkdir -p "$PWD/build/output/Payload"
 
+          # Investigate archive structure
+          echo "Examining archive structure..."
+          ls -la "$PWD/build/CBProProxy.xcarchive/"
+          ls -la "$PWD/build/CBProProxy.xcarchive/Products/" || true
+
+          # Find .app bundle (unsigned builds may place it differently)
+          APP_PATH=""
           if [ -d "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" ]; then
-            cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" "$PWD/build/output/Payload/"
+            APP_PATH="$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app"
+            echo "✅ Found app at: Products/Applications/CBVVPN.app"
+          elif [ -d "$PWD/build/CBProProxy.xcarchive/Products/CBVVPN.app" ]; then
+            APP_PATH="$PWD/build/CBProProxy.xcarchive/Products/CBVVPN.app"
+            echo "✅ Found app at: Products/CBVVPN.app"
           else
-            echo "Error: App not found in archive"
-            exit 1
+            # Search for .app anywhere in archive
+            APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive" -name "CBVVPN.app" -type d | head -n 1)
+            if [ -n "$APP_PATH" ]; then
+              echo "✅ Found app at: $APP_PATH"
+            else
+              echo "❌ Error: CBVVPN.app not found in archive"
+              echo "Archive contents:"
+              find "$PWD/build/CBProProxy.xcarchive" -type d -maxdepth 3
+              exit 1
+            fi
           fi
+
+          # Copy the .app to Payload
+          cp -r "$APP_PATH" "$PWD/build/output/Payload/"
 
           # Remove existing code signatures (AltStore will re-sign)
           find "$PWD/build/output/Payload/CBVVPN.app" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
@@ -296,7 +318,7 @@ jobs:
     needs: [prepare, build-android, build-ios]
     runs-on: ubuntu-latest
     if: always() && (needs.build-android.result == 'success' || needs.build-ios.result == 'success')
-    
+
     steps:
       - name: Download Android APK
         if: needs.build-android.result == 'success'
@@ -372,7 +394,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.inputs.deploy_to_playstore == 'true'
     timeout-minutes: 30
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -380,7 +402,7 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.2'
+          ruby-version: "3.2"
           bundler-cache: false
 
       - name: Setup Fastlane
@@ -434,14 +456,14 @@ jobs:
               repo: context.repo.repo,
               tag: tagName
             });
-            
+
             const track = '${{ github.event.inputs.playstore_track }}' || 'internal';
             const newBody = release.data.body + '\n\n---\n\n## 🏪 Google Play Store Deployment\n\n' +
               '✅ Successfully deployed to **' + track + '** track\n' +
               '- **Version**: ${{ needs.prepare.outputs.version }}\n' +
               '- **Build Number**: ${{ github.run_number }}\n' +
               '- **Deployed at**: ' + new Date().toISOString();
-            
+
             await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,

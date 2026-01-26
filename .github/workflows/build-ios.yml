@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src/**'
-      - 'ios/**'
-      - 'app.json'
-      - 'package.json'
-      - '.github/workflows/build-ios.yml'
+      - "src/**"
+      - "ios/**"
+      - "app.json"
+      - "package.json"
+      - ".github/workflows/build-ios.yml"
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -123,7 +123,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22.x'
+          go-version: "1.22.x"
 
       - name: Verify iOS directory
         run: |
@@ -192,14 +192,34 @@ jobs:
           echo "Creating unsigned IPA for AltStore/Sideloadly..."
           mkdir -p "$PWD/build/output/Payload"
 
-          # Copy the .app from archive to Payload
+          # Investigate archive structure
+          echo "Examining archive structure..."
+          ls -la "$PWD/build/CBProProxy.xcarchive/"
+          ls -la "$PWD/build/CBProProxy.xcarchive/Products/" || true
+
+          # Find .app bundle (unsigned builds may place it differently)
+          APP_PATH=""
           if [ -d "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" ]; then
-            cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" "$PWD/build/output/Payload/"
+            APP_PATH="$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app"
+            echo "✅ Found app at: Products/Applications/CBVVPN.app"
+          elif [ -d "$PWD/build/CBProProxy.xcarchive/Products/CBVVPN.app" ]; then
+            APP_PATH="$PWD/build/CBProProxy.xcarchive/Products/CBVVPN.app"
+            echo "✅ Found app at: Products/CBVVPN.app"
           else
-            echo "Error: App not found in archive"
-            ls -la "$PWD/build/CBProProxy.xcarchive/Products/Applications/" || true
-            exit 1
+            # Search for .app anywhere in archive
+            APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive" -name "CBVVPN.app" -type d | head -n 1)
+            if [ -n "$APP_PATH" ]; then
+              echo "✅ Found app at: $APP_PATH"
+            else
+              echo "❌ Error: CBVVPN.app not found in archive"
+              echo "Archive contents:"
+              find "$PWD/build/CBProProxy.xcarchive" -type d -maxdepth 3
+              exit 1
+            fi
           fi
+
+          # Copy the .app to Payload
+          cp -r "$APP_PATH" "$PWD/build/output/Payload/"
 
           # Remove existing code signatures (AltStore will re-sign)
           find "$PWD/build/output/Payload/CBVVPN.app" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
