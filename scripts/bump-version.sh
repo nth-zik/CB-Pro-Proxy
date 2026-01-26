@@ -2,10 +2,11 @@
 
 # =============================================================================
 # Bump Version Script
-# Usage: ./scripts/bump-version.sh [major|minor|patch] [--yes|-y]
+# Usage: ./scripts/bump-version.sh [major|minor|patch] [--yes|-y] [--store|-s]
 # Default: patch
 # Options:
-#   --yes, -y: Skip confirmation prompt
+#   --yes, -y:   Skip confirmation prompt
+#   --store, -s: Add '-store' suffix to tag for Play Store deployment
 # =============================================================================
 
 set -e
@@ -20,6 +21,7 @@ NC='\033[0m' # No Color
 # Parse arguments
 BUMP_TYPE="patch"
 SKIP_CONFIRM=false
+DEPLOY_TO_STORE=false
 
 for arg in "$@"; do
   case $arg in
@@ -29,9 +31,12 @@ for arg in "$@"; do
     --yes|-y)
       SKIP_CONFIRM=true
       ;;
+    --store|-s)
+      DEPLOY_TO_STORE=true
+      ;;
     *)
       echo -e "${RED}❌ Invalid argument: $arg${NC}"
-      echo "Usage: $0 [major|minor|patch] [--yes|-y]"
+      echo "Usage: $0 [major|minor|patch] [--yes|-y] [--store|-s]"
       exit 1
       ;;
   esac
@@ -70,9 +75,16 @@ case $BUMP_TYPE in
 esac
 
 NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-NEW_TAG="v${NEW_VERSION}"
+if [ "$DEPLOY_TO_STORE" = true ]; then
+  NEW_TAG="v${NEW_VERSION}-store"
+else
+  NEW_TAG="v${NEW_VERSION}"
+fi
 
 echo -e "${GREEN}🚀 New version: ${NEW_VERSION}${NC}"
+if [ "$DEPLOY_TO_STORE" = true ]; then
+  echo -e "${YELLOW}🏪 Deploy to Play Store: YES${NC}"
+fi
 echo ""
 
 # Calculate Android versionCode for preview
@@ -91,6 +103,9 @@ echo -e "  ${YELLOW}Bump type:${NC}       ${BUMP_TYPE}"
 echo -e "  ${YELLOW}Old version:${NC}     ${CURRENT_VERSION}"
 echo -e "  ${GREEN}New version:${NC}     ${NEW_VERSION}"
 echo -e "  ${BLUE}Git tag:${NC}         ${NEW_TAG}"
+if [ "$DEPLOY_TO_STORE" = true ]; then
+  echo -e "  ${GREEN}Play Store:${NC}      Enabled"
+fi
 if [ -n "$PREVIEW_VERSION_CODE" ]; then
   echo -e "  ${YELLOW}Android code:${NC}    ${CURRENT_VERSION_CODE} → ${PREVIEW_VERSION_CODE}"
 fi
@@ -103,10 +118,32 @@ echo ""
 
 # Confirmation prompt
 if [ "$SKIP_CONFIRM" = false ]; then
+  # Ask about Play Store deployment if not already set via flag
+  if [ "$DEPLOY_TO_STORE" = false ]; then
+    echo -e "${BLUE}🏪 Play Store Deployment${NC}"
+    echo -e "${YELLOW}Do you want to deploy this release to Google Play Store?${NC}"
+    echo -e "  • If YES: Tag will be '${NEW_TAG}-store' and will trigger automatic deployment"
+    echo -e "  • If NO:  Tag will be '${NEW_TAG}' (APK/IPA release only)"
+    echo ""
+    read -p "$(echo -e ${GREEN}Deploy to Play Store? [y/N]:${NC} )" -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      DEPLOY_TO_STORE=true
+      NEW_TAG="${NEW_TAG}-store"
+      echo -e "${GREEN}✅ Will deploy to Play Store${NC}"
+    else
+      echo -e "${YELLOW}ℹ️  Will create release without Play Store deployment${NC}"
+    fi
+    echo ""
+  fi
+
   echo -e "${YELLOW}⚠️  This will:${NC}"
   echo "  1. Update version in project files"
   echo "  2. Commit changes with message: 'chore: bump version to ${NEW_VERSION}'"
   echo "  3. Create git tag: ${NEW_TAG}"
+  if [ "$DEPLOY_TO_STORE" = true ]; then
+    echo -e "  ${GREEN}4. Trigger automatic deployment to Play Store (internal track)${NC}"
+  fi
   echo ""
   read -p "$(echo -e ${GREEN}Do you want to continue? [y/N]:${NC} )" -n 1 -r
   echo
@@ -182,10 +219,20 @@ echo -e "${GREEN}╚════════════════════
 echo -e "  ${YELLOW}Old version:${NC}  ${CURRENT_VERSION}"
 echo -e "  ${GREEN}New version:${NC}  ${NEW_VERSION}"
 echo -e "  ${BLUE}Git tag:${NC}      ${NEW_TAG}"
+if [ "$DEPLOY_TO_STORE" = true ]; then
+  echo -e "  ${GREEN}Play Store:${NC}   Will deploy to internal track"
+fi
 echo ""
 echo -e "${YELLOW}📤 Next steps:${NC}"
 echo -e "   ${BLUE}1.${NC} Review changes: ${BLUE}git log -1${NC}"
 echo -e "   ${BLUE}2.${NC} Push to remote: ${GREEN}git push && git push --tags${NC}"
 echo ""
-echo -e "${YELLOW}💡 Tip:${NC} The tag will trigger CI/CD workflows to build releases"
+if [ "$DEPLOY_TO_STORE" = true ]; then
+  echo -e "${YELLOW}💡 Tip:${NC} The tag '${NEW_TAG}' will trigger:"
+  echo -e "   • Build APK and IPA files"
+  echo -e "   • Create GitHub release"
+  echo -e "   ${GREEN}• Deploy to Google Play Store (internal track)${NC}"
+else
+  echo -e "${YELLOW}💡 Tip:${NC} The tag will trigger CI/CD workflows to build APK and IPA releases"
+fi
 echo ""

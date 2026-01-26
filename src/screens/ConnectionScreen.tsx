@@ -43,7 +43,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
     setError,
   } = useVPNStore();
   const activeHealth = useProxyHealthStore((s) =>
-    activeProfileId ? s.health[activeProfileId] : undefined
+    activeProfileId ? s.health[activeProfileId] : undefined,
   );
   const enqueueHealthCheck = useProxyHealthStore((s) => s.enqueueCheck);
 
@@ -78,7 +78,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
       if (Platform.OS === "android" && Platform.Version >= 33) {
         try {
           const granted = await PermissionsAndroid.request(
-            "android.permission.POST_NOTIFICATIONS" as any
+            "android.permission.POST_NOTIFICATIONS" as any,
           );
           if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
             console.warn("POST_NOTIFICATIONS permission was not granted.");
@@ -124,7 +124,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
   const showAlert = (
     title: string,
     message: string,
-    buttons: typeof alertConfig.buttons
+    buttons: typeof alertConfig.buttons,
   ) => {
     setAlertConfig({ visible: true, title, message, buttons });
   };
@@ -135,7 +135,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
 
   const activeProfile = useMemo(
     () => profiles.find((p) => p.id === activeProfileId),
-    [profiles, activeProfileId]
+    [profiles, activeProfileId],
   );
 
   useEffect(() => {
@@ -240,7 +240,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
   }, [connectionState, colors]);
 
   const lastSampleRef = useRef<{ ts: number; up: number; down: number } | null>(
-    null
+    null,
   );
   const [speeds, setSpeeds] = useState<{ upBps: number; downBps: number }>({
     upBps: 0,
@@ -391,7 +391,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
   const formatSpeedTestResult = () => {
     if (!speedTestResult) return "Tap to test";
     return `${formatRate(speedTestResult.downBps)} down / ${formatRate(
-      speedTestResult.upBps
+      speedTestResult.upBps,
     )} up`;
   };
 
@@ -427,7 +427,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
 
   const withTimeout = async <T,>(
     promise: Promise<T>,
-    timeoutMs: number
+    timeoutMs: number,
   ): Promise<T> => {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
@@ -495,7 +495,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
           const durationMs = Math.max(1, Date.now() - start);
           return { bps: (bytes / durationMs) * 1000 };
         })(),
-        timeoutMs
+        timeoutMs,
       );
 
       const uploadResult = await withTimeout(
@@ -514,7 +514,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
           const durationMs = Math.max(1, Date.now() - start);
           return { bps: (uploadBytes / durationMs) * 1000 };
         })(),
-        timeoutMs
+        timeoutMs,
       );
 
       setSpeedTestResult({
@@ -523,8 +523,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
         ranAt: Date.now(),
       });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Speed test failed";
+      const message = err instanceof Error ? err.message : "Speed test failed";
       setSpeedTestError(message);
     } finally {
       setIsSpeedTesting(false);
@@ -543,7 +542,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
             text: "Select Profile",
             onPress: () => navigation.navigate("Profiles"),
           },
-        ]
+        ],
       );
       return;
     }
@@ -552,10 +551,52 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
     setVPNStatus("connecting");
 
     try {
+      // iOS: Prepare VPN permission first
+      if (Platform.OS === "ios") {
+        console.log("🔐 Requesting VPN permission...");
+        try {
+          const granted = await VPNModule.prepareVPN();
+          console.log("✅ VPN permission result:", granted);
+        } catch (prepareError: any) {
+          console.error("❌ VPN permission error:", prepareError);
+
+          const errorMsg = prepareError?.message || String(prepareError);
+
+          // Check for entitlement/configuration errors
+          if (
+            errorMsg.includes("entitlement") ||
+            errorMsg.includes("provisioning") ||
+            errorMsg.includes("Read/Write") ||
+            prepareError?.code?.includes("CONFIG")
+          ) {
+            showAlert(
+              "VPN Configuration Error",
+              "TrollStore Setup Required:\n\n1. Open Settings → General → VPN & Device Management\n2. Look for 'CB Pro Proxy' or similar VPN profile\n3. Tap it and select 'Trust'\n4. Return here and try connecting again\n\nIf no profile exists, the app may need to be reinstalled via TrollStore with proper entitlements.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Open Settings",
+                  onPress: async () => {
+                    try {
+                      await VPNModule.openVPNSettings();
+                    } catch (err) {
+                      console.error("Failed to open settings:", err);
+                    }
+                  },
+                },
+              ],
+            );
+            setIsConnectingLocal(false);
+            setVPNStatus("disconnected");
+            return;
+          }
+        }
+      }
+
       if (Platform.OS === "android" && Platform.Version >= 33) {
         try {
           const granted = await PermissionsAndroid.request(
-            "android.permission.POST_NOTIFICATIONS" as any
+            "android.permission.POST_NOTIFICATIONS" as any,
           );
           if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
             console.warn("POST_NOTIFICATIONS permission not granted");
@@ -563,7 +604,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
         } catch (permErr) {
           console.warn(
             "Failed to request POST_NOTIFICATIONS permission",
-            permErr
+            permErr,
           );
         }
       }
@@ -571,7 +612,7 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
       console.log(
         "🔵 Starting VPN with profile:",
         activeProfile.id,
-        activeProfile.name
+        activeProfile.name,
       );
 
       const refreshedProfile =
@@ -586,17 +627,39 @@ export const ConnectionScreen: React.FC<ConnectionScreenProps> = ({
         refreshedProfile.username || "",
         refreshedProfile.password || "",
         refreshedProfile.dns1,
-        refreshedProfile.dns2
+        refreshedProfile.dns2,
       );
+
       if (Platform.OS === "ios") {
+        // Wait a bit for iOS to process the VPN request
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
         const status = await VPNModule.getStatus();
         const state = status?.state || "disconnected";
-        if (state !== "connecting" && state !== "connected") {
+
+        console.log("🔍 iOS VPN status after start:", state);
+
+        if (state === "disconnected" || state === "error") {
           showAlert(
-            "VPN Not Started",
-            "iOS did not start the VPN. Check Network Extension entitlement and provisioning.",
-            [{ text: "OK" }]
+            "VPN Setup Required",
+            "First-time setup:\n\n1. Go to Settings → General → VPN & Device Management\n2. Find and tap 'CB Pro Proxy' profile\n3. Tap 'Trust' to enable VPN\n4. Return here and connect again\n\nNote: This is required for TrollStore installations.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Open Settings",
+                onPress: async () => {
+                  try {
+                    await VPNModule.openVPNSettings();
+                  } catch (err) {
+                    console.error("Failed to open settings:", err);
+                  }
+                },
+              },
+            ],
           );
+          setIsConnectingLocal(false);
+          setVPNStatus("disconnected");
+          return;
         }
       }
       console.log("✅ VPN started successfully");
