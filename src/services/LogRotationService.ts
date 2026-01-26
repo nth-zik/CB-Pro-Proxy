@@ -29,8 +29,8 @@ const STORAGE_KEYS = {
  * Storage limits
  */
 const STORAGE_LIMITS = {
-  MAX_PARTITION_SIZE: 2 * 1024 * 1024, // 2MB per partition (reduced from 5MB)
-  MAX_TOTAL_SIZE: 2 * 1024 * 1024, // 2MB total (reduced from 50MB)
+  MAX_PARTITION_SIZE: 1 * 1024 * 1024, // 1MB per partition (reduced from 2MB for better performance)
+  MAX_TOTAL_SIZE: 1 * 1024 * 1024, // 1MB total (reduced from 2MB to prevent lag)
   RETENTION_DAYS: 7, // Reduced from 30 days to 7 days
   SQLITE_ROW_SOFT_LIMIT: 900 * 1024, // ~900KB to stay under CursorWindow row limit
 } as const;
@@ -101,7 +101,7 @@ class LogRotationService {
       index.lastUpdated = Date.now();
       await AsyncStorage.setItem(
         STORAGE_KEYS.LOGS_INDEX,
-        JSON.stringify(index)
+        JSON.stringify(index),
       );
     } catch (error) {
       console.error("Failed to save partition index:", error);
@@ -114,7 +114,7 @@ class LogRotationService {
    */
   private getPartition(
     index: LogPartitionIndex,
-    partitionId: string
+    partitionId: string,
   ): LogPartition | undefined {
     return index.partitions.find((p) => p.id === partitionId);
   }
@@ -171,7 +171,7 @@ class LogRotationService {
   private async savePartition(
     index: LogPartitionIndex,
     partitionId: string,
-    newLogs: LogEntry[]
+    newLogs: LogEntry[],
   ): Promise<void> {
     const partitionKey = this.getPartitionKey(partitionId);
 
@@ -186,25 +186,25 @@ class LogRotationService {
       // Merge with duplicate detection
       const existingIds = new Set(existingLogs.map((log) => log.id));
       const uniqueNewLogs = newLogs.filter((log) => !existingIds.has(log.id));
-      
+
       if (uniqueNewLogs.length < newLogs.length) {
         console.warn(
-          `[LogRotationService] Filtered out ${newLogs.length - uniqueNewLogs.length} duplicate logs in partition ${partitionId}`
+          `[LogRotationService] Filtered out ${newLogs.length - uniqueNewLogs.length} duplicate logs in partition ${partitionId}`,
         );
       }
 
       // Merge and sort by timestamp
       let allLogs = [...existingLogs, ...uniqueNewLogs].sort(
-        (a, b) => a.timestamp - b.timestamp
+        (a, b) => a.timestamp - b.timestamp,
       );
 
       // Trim if payload is too large (respect 2MB limit)
       let size = this.estimateSize(allLogs);
       const sizeLimit = Math.min(
         STORAGE_LIMITS.SQLITE_ROW_SOFT_LIMIT,
-        STORAGE_LIMITS.MAX_PARTITION_SIZE
+        STORAGE_LIMITS.MAX_PARTITION_SIZE,
       );
-      
+
       if (size > sizeLimit) {
         const originalCount = allLogs.length;
         // Drop oldest logs until under size limit
@@ -213,13 +213,15 @@ class LogRotationService {
           size = this.estimateSize(allLogs);
         }
         console.warn(
-          `[LogRotationService] Trimmed ${originalCount - allLogs.length} logs from partition ${partitionId} to fit ${sizeLimit} bytes limit (was ${this.estimateSize([...Array(originalCount)])} bytes)`
+          `[LogRotationService] Trimmed ${originalCount - allLogs.length} logs from partition ${partitionId} to fit ${sizeLimit} bytes limit (was ${this.estimateSize([...Array(originalCount)])} bytes)`,
         );
       }
 
       // Calculate partition metadata
       const timestamps = allLogs.map((l) => l.timestamp);
-      const startTime = timestamps.length ? Math.min(...timestamps) : Date.now();
+      const startTime = timestamps.length
+        ? Math.min(...timestamps)
+        : Date.now();
       const endTime = timestamps.length ? Math.max(...timestamps) : Date.now();
 
       // Save partition
@@ -254,7 +256,7 @@ class LogRotationService {
    */
   public async loadLogs(
     startTime?: number,
-    endTime?: number
+    endTime?: number,
   ): Promise<LogEntry[]> {
     try {
       const index = await this.loadPartitionIndex();
@@ -272,7 +274,7 @@ class LogRotationService {
 
         if (data) {
           const logs: LogEntry[] = JSON.parse(data);
-          
+
           // Filter out duplicates across partitions
           const uniqueLogs = logs.filter((log) => {
             if (seenIds.has(log.id)) {
@@ -281,7 +283,7 @@ class LogRotationService {
             seenIds.add(log.id);
             return true;
           });
-          
+
           allLogs.push(...uniqueLogs);
         }
       }
@@ -314,7 +316,7 @@ class LogRotationService {
       // If total size exceeds limit, remove oldest partitions
       if (totalSize > STORAGE_LIMITS.MAX_TOTAL_SIZE) {
         const sorted = [...index.partitions].sort(
-          (a, b) => a.startTime - b.startTime
+          (a, b) => a.startTime - b.startTime,
         );
 
         // Remove oldest 25% of partitions
@@ -335,7 +337,7 @@ class LogRotationService {
    */
   private async removePartition(
     index: LogPartitionIndex,
-    partitionId: string
+    partitionId: string,
   ): Promise<void> {
     try {
       const partitionKey = this.getPartitionKey(partitionId);
@@ -357,7 +359,7 @@ class LogRotationService {
       const index = await this.loadPartitionIndex();
 
       const oldPartitions = index.partitions.filter(
-        (p) => p.endTime < cutoffTime
+        (p) => p.endTime < cutoffTime,
       );
 
       for (const partition of oldPartitions) {

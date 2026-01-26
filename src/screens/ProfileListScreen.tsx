@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+} from "react";
 import {
   View,
   Text,
@@ -45,8 +51,10 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
   const enqueueCheck = useProxyHealthStore((s) => s.enqueueCheck);
 
   const [isImportModalVisible, setIsImportModalVisible] = useState(false);
-  const [isHealthCheckModalVisible, setIsHealthCheckModalVisible] = useState(false);
-  const [isProxySourcesModalVisible, setIsProxySourcesModalVisible] = useState(false);
+  const [isHealthCheckModalVisible, setIsHealthCheckModalVisible] =
+    useState(false);
+  const [isProxySourcesModalVisible, setIsProxySourcesModalVisible] =
+    useState(false);
 
   // Bulk selection state
   const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -54,8 +62,14 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
 
   // Delete progress state
   const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteProgress, setDeleteProgress] = useState({ current: 0, total: 0 });
-  const [deleteResult, setDeleteResult] = useState<{ success: number; failed: number } | null>(null);
+  const [deleteProgress, setDeleteProgress] = useState({
+    current: 0,
+    total: 0,
+  });
+  const [deleteResult, setDeleteResult] = useState<{
+    success: number;
+    failed: number;
+  } | null>(null);
   const cancelDeleteRef = useRef(false);
 
   const {
@@ -89,7 +103,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
     if (q) {
       result = result.filter(
         (p) =>
-          p.name.toLowerCase().includes(q) || p.host.toLowerCase().includes(q)
+          p.name.toLowerCase().includes(q) || p.host.toLowerCase().includes(q),
       );
     }
 
@@ -135,7 +149,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
       setIsRefreshing(true);
       // Wrap loadProfiles in a timeout race to ensure spinner always stops
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Refresh timed out")), 10000)
+        setTimeout(() => reject(new Error("Refresh timed out")), 10000),
       );
 
       await Promise.race([
@@ -164,7 +178,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
       console.error("❌ Failed to refresh profiles:", errorMsg);
       modal.showError(
         "Refresh Failed",
-        `Failed to refresh profiles: ${errorMsg}`
+        `Failed to refresh profiles: ${errorMsg}`,
       );
     } finally {
       setIsRefreshing(false);
@@ -192,7 +206,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
       },
       undefined,
       "Delete",
-      "Cancel"
+      "Cancel",
     );
   };
 
@@ -262,7 +276,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
     if (unhealthyIds.size === 0) {
       modal.showInfo(
         "No Unhealthy Profiles",
-        "No profiles with 'fail' status found in current list."
+        "No profiles with 'fail' status found in current list.",
       );
       return;
     }
@@ -270,7 +284,42 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
     setSelectedIds(unhealthyIds);
     modal.showInfo(
       "Selected Unhealthy",
-      `Selected ${unhealthyIds.size} unhealthy profiles.`
+      `Selected ${unhealthyIds.size} unhealthy profiles.`,
+    );
+  };
+
+  const handleDeleteUnhealthy = () => {
+    const unhealthyIds = new Set<string>();
+    const currentHealth = useProxyHealthStore.getState().health;
+
+    filteredProfiles.forEach((p) => {
+      const h = currentHealth[p.id];
+      if (h && h.status === "fail") {
+        unhealthyIds.add(p.id);
+      }
+    });
+
+    if (unhealthyIds.size === 0) {
+      modal.showInfo(
+        "No Unhealthy Profiles",
+        "No profiles with 'fail' status found in current list.",
+      );
+      return;
+    }
+
+    const count = unhealthyIds.size;
+    modal.showConfirm(
+      "Delete Unhealthy Profiles",
+      `Are you sure you want to delete ${count} unhealthy profile${
+        count > 1 ? "s" : ""
+      }?`,
+      () => {
+        const idsArray = Array.from(unhealthyIds);
+        handleBulkDeleteWithProgress(idsArray);
+      },
+      undefined,
+      "Delete",
+      "Cancel",
     );
   };
 
@@ -292,7 +341,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
       },
       undefined,
       "Delete",
-      "Cancel"
+      "Cancel",
     );
   };
 
@@ -313,7 +362,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
       },
       undefined,
       "Delete All",
-      "Cancel"
+      "Cancel",
     );
   };
 
@@ -348,7 +397,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
     // Set result
     setDeleteResult({ success: successCount, failed: failCount });
     setIsDeleting(false);
-    
+
     // Clear selection
     setSelectedIds(new Set());
     setIsSelectionMode(false);
@@ -373,7 +422,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
         }
       }
     },
-    [enqueueCheck]
+    [enqueueCheck],
   );
 
   const renderProfile = useCallback(
@@ -407,7 +456,7 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
       handleCheckProfile,
       handleEditProfile,
       handleDeleteProfile,
-    ]
+    ],
   );
 
   return (
@@ -505,25 +554,46 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
               }
             >
               <Ionicons
-                name={selectedIds.size === profiles.length ? "square-outline" : "checkbox-outline"}
+                name={
+                  selectedIds.size === profiles.length
+                    ? "square-outline"
+                    : "checkbox-outline"
+                }
                 size={18}
                 color={colors.interactive.primary}
               />
               <Text style={styles.selectOptionText}>
-                {selectedIds.size === profiles.length ? "Deselect All" : "Select All"}
+                {selectedIds.size === profiles.length
+                  ? "Deselect All"
+                  : "Select All"}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.selectOptionButton}
               onPress={selectUnhealthy}
             >
-              <Ionicons
-                name="pulse"
-                size={18}
-                color={colors.status.error}
-              />
-              <Text style={[styles.selectOptionText, { color: colors.status.error }]}>
+              <Ionicons name="pulse" size={18} color={colors.status.error} />
+              <Text
+                style={[
+                  styles.selectOptionText,
+                  { color: colors.status.error },
+                ]}
+              >
                 Select Unhealthy
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.selectOptionButton}
+              onPress={handleDeleteUnhealthy}
+            >
+              <Ionicons name="trash" size={18} color={colors.status.error} />
+              <Text
+                style={[
+                  styles.selectOptionText,
+                  { color: colors.status.error },
+                ]}
+              >
+                Delete Unhealthy
               </Text>
             </TouchableOpacity>
           </View>
@@ -546,8 +616,15 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
             onChangeText={setQuery}
           />
           {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery("")} style={styles.clearButton}>
-              <Ionicons name="close-circle" size={18} color={colors.text.tertiary} />
+            <TouchableOpacity
+              onPress={() => setQuery("")}
+              style={styles.clearButton}
+            >
+              <Ionicons
+                name="close-circle"
+                size={18}
+                color={colors.text.tertiary}
+              />
             </TouchableOpacity>
           )}
         </View>
@@ -676,7 +753,11 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
               </Text>
               {!isDeleting && (
                 <TouchableOpacity onPress={handleCloseDeleteProgress}>
-                  <Ionicons name="close" size={24} color={colors.text.primary} />
+                  <Ionicons
+                    name="close"
+                    size={24}
+                    color={colors.text.primary}
+                  />
                 </TouchableOpacity>
               )}
             </View>
@@ -692,11 +773,21 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
                   />
                   <Text style={styles.resultTitle}>Done!</Text>
                   <View style={styles.resultStats}>
-                    <Text style={[styles.resultStat, { color: colors.status.success }]}>
+                    <Text
+                      style={[
+                        styles.resultStat,
+                        { color: colors.status.success },
+                      ]}
+                    >
                       ✅ {deleteResult.success} deleted
                     </Text>
                     {deleteResult.failed > 0 && (
-                      <Text style={[styles.resultStat, { color: colors.status.error }]}>
+                      <Text
+                        style={[
+                          styles.resultStat,
+                          { color: colors.status.error },
+                        ]}
+                      >
                         ❌ {deleteResult.failed} failed
                       </Text>
                     )}
@@ -719,7 +810,12 @@ export const ProfileListScreen: React.FC<ProfileListScreenProps> = ({
                     />
                   </View>
                   <Text style={styles.progressPercent}>
-                    {deleteProgress.total > 0 ? Math.round((deleteProgress.current / deleteProgress.total) * 100) : 0}%
+                    {deleteProgress.total > 0
+                      ? Math.round(
+                          (deleteProgress.current / deleteProgress.total) * 100,
+                        )
+                      : 0}
+                    %
                   </Text>
                 </View>
               )}

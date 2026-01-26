@@ -27,8 +27,8 @@ const DEFAULT_CONFIG: LoggerConfig = {
   enabled: true,
   // Removed "debug" and "info" to reduce noise for user and terminal
   levels: ["warn", "error", "critical"],
-  maxEntries: 200, // Reduced from 1000
-  maxStorageEntries: 1000, // Reduced from 5000
+  maxEntries: 100, // Reduced from 200 to minimize memory usage
+  maxStorageEntries: 500, // Reduced from 1000 to prevent lag
   persistLogs: true,
   consoleOutput: __DEV__, // Only in development
 };
@@ -121,7 +121,7 @@ class LoggerService {
     data?: any,
     error?: Error,
     vpnStatus?: VPNStatus,
-    profileId?: string
+    profileId?: string,
   ): LogEntry {
     const id = uuidv4();
 
@@ -254,7 +254,7 @@ class LoggerService {
     message: string,
     category: LogCategory,
     error?: Error,
-    data?: any
+    data?: any,
   ): void {
     if (!this.config.enabled || !this.config.levels.includes("error")) {
       return;
@@ -275,7 +275,7 @@ class LoggerService {
     message: string,
     category: LogCategory,
     error?: Error,
-    data?: any
+    data?: any,
   ): void {
     if (!this.config.enabled || !this.config.levels.includes("critical")) {
       return;
@@ -286,7 +286,7 @@ class LoggerService {
       message,
       category,
       data,
-      error
+      error,
     );
     this.processLog(entry);
   }

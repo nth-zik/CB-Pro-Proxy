@@ -194,28 +194,28 @@ jobs:
 
           # Investigate archive structure
           echo "Examining archive structure..."
-          ls -la "$PWD/build/CBProProxy.xcarchive/"
-          ls -la "$PWD/build/CBProProxy.xcarchive/Products/" || true
+          ls -la "$PWD/build/CBProProxy.xcarchive/Products/Applications/" || true
 
-          # Find .app bundle (unsigned builds may place it differently)
-          APP_PATH=""
-          if [ -d "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" ]; then
-            APP_PATH="$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app"
-            echo "✅ Found app at: Products/Applications/CBVVPN.app"
-          elif [ -d "$PWD/build/CBProProxy.xcarchive/Products/CBVVPN.app" ]; then
-            APP_PATH="$PWD/build/CBProProxy.xcarchive/Products/CBVVPN.app"
-            echo "✅ Found app at: Products/CBVVPN.app"
+          # Find .app bundle (app name may vary based on archive name)
+          APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive/Products/Applications" -name "*.app" -type d -maxdepth 1 | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            # Fallback: try Products/ directly
+            APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive/Products" -name "*.app" -type d -maxdepth 1 | head -n 1)
+          fi
+
+          if [ -z "$APP_PATH" ]; then
+            # Last resort: search entire archive
+            APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive" -name "*.app" -type d | grep -v "Plugins" | head -n 1)
+          fi
+
+          if [ -n "$APP_PATH" ]; then
+            echo "✅ Found app at: $APP_PATH"
           else
-            # Search for .app anywhere in archive
-            APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive" -name "CBVVPN.app" -type d | head -n 1)
-            if [ -n "$APP_PATH" ]; then
-              echo "✅ Found app at: $APP_PATH"
-            else
-              echo "❌ Error: CBVVPN.app not found in archive"
-              echo "Archive contents:"
-              find "$PWD/build/CBProProxy.xcarchive" -type d -maxdepth 3
-              exit 1
-            fi
+            echo "❌ Error: No .app bundle found in archive"
+            echo "Archive structure:"
+            find "$PWD/build/CBProProxy.xcarchive" -type d -maxdepth 3
+            exit 1
           fi
 
           # Copy the .app to Payload
