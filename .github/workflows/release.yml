@@ -290,9 +290,13 @@ jobs:
           # Copy the .app to Payload
           cp -r "$APP_PATH" "$PWD/build/output/Payload/"
 
+          # Get app name from path
+          APP_NAME=$(basename "$APP_PATH")
+          echo "📱 App name: $APP_NAME"
+
           # Remove existing code signatures (AltStore will re-sign)
-          find "$PWD/build/output/Payload/CBVVPN.app" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
-          find "$PWD/build/output/Payload/CBVVPN.app" -name "embedded.mobileprovision" -type f -exec rm -f {} +
+          find "$PWD/build/output/Payload/$APP_NAME" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
+          find "$PWD/build/output/Payload/$APP_NAME" -name "embedded.mobileprovision" -type f -exec rm -f {} +
 
           cd "$PWD/build/output"
           zip -r CBProProxy.ipa Payload
