@@ -1,6 +1,6 @@
 {
   "name": "cbv-vpn-app",
-  "version": "1.0.35",
+  "version": "1.0.34",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
