@@ -236,9 +236,10 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.prepare.outputs.version }}" ios/CBVVPNProxyExtension/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" ios/CBVVPNProxyExtension/Info.plist
 
-      - name: Build iOS Archive (Unsigned)
+      - name: Build iOS Archive (Unsigned for Sideloading)
         run: |
           cd ios
+          set -o pipefail
           xcodebuild \
             -workspace CBVVPN.xcworkspace \
             -scheme CBVVPN \
@@ -251,18 +252,23 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             DEVELOPMENT_TEAM="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
-            clean archive
+            clean archive 2>&1 | tee "$PWD/build/xcodebuild.log"
 
-      - name: Export IPA (Unsigned)
+      - name: Create Unsigned IPA for Sideloading
         run: |
           cd ios
-          
-          # Create IPA manually from archive
-          echo "Creating IPA from archive..."
-          mkdir -p "$PWD/build/output/Payload"
-          cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" "$PWD/build/output/Payload/"
 
-          # Remove code signatures and provisioning profiles (for unsigned install)
+          echo "Creating unsigned IPA for AltStore/Sideloadly..."
+          mkdir -p "$PWD/build/output/Payload"
+
+          if [ -d "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" ]; then
+            cp -r "$PWD/build/CBProProxy.xcarchive/Products/Applications/CBVVPN.app" "$PWD/build/output/Payload/"
+          else
+            echo "Error: App not found in archive"
+            exit 1
+          fi
+
+          # Remove existing code signatures (AltStore will re-sign)
           find "$PWD/build/output/Payload/CBVVPN.app" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
           find "$PWD/build/output/Payload/CBVVPN.app" -name "embedded.mobileprovision" -type f -exec rm -f {} +
 
@@ -270,11 +276,13 @@ jobs:
           zip -r CBProProxy.ipa Payload
           rm -rf Payload
 
+          echo "✅ Unsigned IPA created for AltStore/Sideloadly/TrollStore"
+
       - name: Rename IPA with version
         run: |
           mkdir -p build-output
           cp ios/build/output/CBProProxy.ipa \
-             "build-output/cbv-vpn-unsigned-v${{ needs.prepare.outputs.version }}.ipa"
+             "build-output/CBProProxy-${{ needs.prepare.outputs.version }}-unsigned.ipa"
 
       - name: Upload iOS artifact
         uses: actions/upload-artifact@v4
@@ -316,38 +324,43 @@ jobs:
           name: Release v${{ needs.prepare.outputs.version }}
           files: release-assets/*
           body: |
-            # 🚀 Release v${{ needs.prepare.outputs.version }}
-            
-            ## 📦 Downloads
-            
-            ### Android APK (Signed)
+            ## CB Pro Proxy v${{ needs.prepare.outputs.version }}
+
+            ### Android APK
             ${{ needs.build-android.result == 'success' && '✅ Available' || '❌ Build failed' }}
             - **File**: `cbv-vpn-v${{ needs.prepare.outputs.version }}.apk`
-            - **Installation**: Enable "Unknown sources" in Android settings, then install the APK
-            
-            ### iOS IPA (Unsigned)
+            - **Install**: Enable "Unknown sources" → Install APK
+
+            ### iOS IPA (Unsigned - for Sideloading)
             ${{ needs.build-ios.result == 'success' && '✅ Available' || '❌ Build failed' }}
-            - **File**: `cbv-vpn-unsigned-v${{ needs.prepare.outputs.version }}.ipa`
-            - **Installation Options**:
-              1. Sign with your own certificate using iOS App Signer or Xcode
-              2. Install directly on jailbroken devices
-              3. Use third-party signing services (at your own risk)
-            
-            ## 📝 What's Changed
-            
-            ${{ github.event.inputs.release_notes || needs.prepare.outputs.release_notes }}
-            
-            ## 🔧 Build Information
-            
-            - **Version**: ${{ needs.prepare.outputs.version }}
-            - **Build Number**: ${{ github.run_number }}
-            - **Commit**: ${{ github.sha }}
-            - **Android Status**: ${{ needs.build-android.result }}
-            - **iOS Status**: ${{ needs.build-ios.result }}
-            
+            - **File**: `CBProProxy-${{ needs.prepare.outputs.version }}-unsigned.ipa`
+
+            #### Installation Guide
+
+            **AltStore (Recommended):**
+            1. Download IPA file
+            2. Open AltStore → "My Apps" → tap "+"
+            3. Select downloaded IPA → Wait for install
+            4. Re-sign every 7 days via AltStore
+
+            **Sideloadly:**
+            1. Download IPA file
+            2. Connect iPhone to computer
+            3. Open Sideloadly → Drag IPA into it
+            4. Enter Apple ID → Install
+
+            **TrollStore (iOS 14.0-16.6.1):**
+            1. Download IPA file
+            2. Open in TrollStore → Install
+            3. No re-signing needed!
+
             ---
-            
-            *Built with ❤️ using GitHub Actions*
+
+            ### Changes
+            ${{ github.event.inputs.release_notes || needs.prepare.outputs.release_notes }}
+
+            ---
+            Build #${{ github.run_number }} | Commit: `${{ github.sha }}`
           draft: false
           prerelease: false
         env:

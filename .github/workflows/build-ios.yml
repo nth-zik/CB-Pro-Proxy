@@ -1,18 +1,29 @@
-name: Build iOS IPA (Unsigned)
+name: Build iOS IPA (Sideload - AltStore/Sideloadly)
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'ios/**'
+      - 'app.json'
+      - 'package.json'
+      - '.github/workflows/build-ios.yml'
   pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
       version:
-        description: "Optional version to use (e.g. 1.2.3). If provided, this overrides tag-based version."
+        description: "Version to use (e.g. 1.2.3). Leave empty to use app.json version."
         required: false
         default: ""
+      create_release:
+        description: "Create a GitHub Release with the IPA"
+        required: false
+        type: boolean
+        default: false
       release_notes:
-        description: "Release notes to include in the GitHub Release"
+        description: "Release notes for GitHub Release"
         required: false
         default: ""
 
@@ -22,6 +33,9 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      ipa_name: ${{ steps.rename.outputs.ipa_name }}
 
     steps:
       - name: Checkout code
@@ -67,8 +81,9 @@ jobs:
             VERSION=${GITHUB_REF#refs/tags/v}
             echo "Using tag-based version: $VERSION"
           else
-            VERSION=1.0.0
-            echo "Using default version: $VERSION"
+            # Read version from app.json
+            VERSION=$(node -p "require('./app.json').expo.version")
+            echo "Using app.json version: $VERSION"
           fi
           VERSION=${VERSION#v}
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -143,7 +158,7 @@ jobs:
           echo "Workspace found successfully"
           ls -la CBVVPN.xcworkspace/
 
-      - name: Build iOS Archive (Production - Unsigned for TrollStore)
+      - name: Build iOS Archive (Unsigned for Sideloading)
         run: |
           cd ios
           set -o pipefail
@@ -170,11 +185,11 @@ jobs:
           tail -n 200 "$PWD/build/xcodebuild.log" || true
           exit $build_status
 
-      - name: Create Production IPA for TrollStore (No Signing)
+      - name: Create Unsigned IPA for Sideloading
         run: |
           cd ios
 
-          echo "Creating production IPA from archive for TrollStore..."
+          echo "Creating unsigned IPA for AltStore/Sideloadly..."
           mkdir -p "$PWD/build/output/Payload"
 
           # Copy the .app from archive to Payload
@@ -186,26 +201,110 @@ jobs:
             exit 1
           fi
 
-          # Remove code signatures and provisioning profiles (important for unsigned installs)
+          # Remove existing code signatures (AltStore will re-sign)
           find "$PWD/build/output/Payload/CBVVPN.app" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
           find "$PWD/build/output/Payload/CBVVPN.app" -name "embedded.mobileprovision" -type f -exec rm -f {} +
 
-          # Create IPA
+          # Create IPA with proper structure
           cd "$PWD/build/output"
           zip -r CBProProxy.ipa Payload
           rm -rf Payload
 
-          echo "Production IPA created successfully for TrollStore"
+          echo "✅ Unsigned IPA created successfully"
+          echo "📱 Compatible with: AltStore, Sideloadly, TrollStore, Scarlet"
           ls -lh CBProProxy.ipa
 
       - name: Rename IPA with version
+        id: rename
         run: |
           cd ios/build/output
-          mv CBProProxy.ipa "CBProProxy-production-trollstore-${{ steps.version.outputs.version }}-${{ github.run_number }}.ipa"
+          IPA_NAME="CBProProxy-${{ steps.version.outputs.version }}-b${{ github.run_number }}-unsigned.ipa"
+          mv CBProProxy.ipa "$IPA_NAME"
+          echo "ipa_name=$IPA_NAME" >> $GITHUB_OUTPUT
+          echo "📦 IPA: $IPA_NAME"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-production-trollstore-ipa
+          name: ios-unsigned-ipa
           path: ios/build/output/*.ipa
           retention-days: 30
+
+  # Optional: Create GitHub Release
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event.inputs.create_release == 'true' || startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: ./release
+
+      - name: Generate Release Notes
+        id: notes
+        run: |
+          if [[ -n "${{ github.event.inputs.release_notes }}" ]]; then
+            NOTES="${{ github.event.inputs.release_notes }}"
+          else
+            # Get commits since last tag
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [[ -n "$PREVIOUS_TAG" ]]; then
+              COMMITS=$(git log "$PREVIOUS_TAG..HEAD" --pretty=format:"- %s" | head -20)
+            else
+              COMMITS=$(git log -n 10 --pretty=format:"- %s")
+            fi
+            NOTES="$COMMITS"
+          fi
+
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "notes<<$EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "$EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build.outputs.version }}
+          name: CB Pro Proxy v${{ needs.build.outputs.version }} (iOS)
+          body: |
+            ## 📱 CB Pro Proxy v${{ needs.build.outputs.version }}
+
+            ### Installation Guide
+
+            **Using AltStore:**
+            1. Download the IPA file below
+            2. Open AltStore on your device
+            3. Go to "My Apps" tab → tap "+" button
+            4. Select the downloaded IPA file
+            5. Wait for installation to complete
+
+            **Using Sideloadly:**
+            1. Download the IPA file below
+            2. Connect your iPhone to computer
+            3. Open Sideloadly and drag the IPA into it
+            4. Enter your Apple ID and install
+
+            **Using TrollStore:**
+            1. Download the IPA file below
+            2. Open in TrollStore and tap "Install"
+
+            ---
+
+            ### Changes
+            ${{ steps.notes.outputs.notes }}
+
+            ---
+            Build: #${{ github.run_number }}
+          files: ./release/*.ipa
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
