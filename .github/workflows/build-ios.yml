@@ -185,11 +185,19 @@ jobs:
           tail -n 200 "$PWD/build/xcodebuild.log" || true
           exit $build_status
 
-      - name: Create Unsigned IPA for Sideloading
+      - name: Install ldid for TrollStore signing
+        run: |
+          if ! command -v ldid &> /dev/null; then
+            echo "Installing ldid..."
+            brew install ldid
+          fi
+          ldid --version || echo "ldid installed"
+
+      - name: Create IPA with ldid signing for TrollStore
         run: |
           cd ios
 
-          echo "Creating unsigned IPA for AltStore/Sideloadly..."
+          echo "Creating IPA with ldid signing for TrollStore..."
           mkdir -p "$PWD/build/output/Payload"
 
           # Investigate archive structure
@@ -223,19 +231,63 @@ jobs:
 
           # Get app name from path
           APP_NAME=$(basename "$APP_PATH")
-          echo "📱 App name: $APP_NAME"
+          BINARY_NAME="${APP_NAME%.app}"
+          echo "📱 App bundle: $APP_NAME"
+          echo "📱 Binary name: $BINARY_NAME"
 
-          # Remove existing code signatures (AltStore will re-sign)
-          find "$PWD/build/output/Payload/$APP_NAME" -name "_CodeSignature" -type d -prune -exec rm -rf {} +
-          find "$PWD/build/output/Payload/$APP_NAME" -name "embedded.mobileprovision" -type f -exec rm -f {} +
+          # Sign with ldid for TrollStore VPN support
+          echo "🔐 Signing with ldid for TrollStore..."
+
+          MAIN_ENTITLEMENTS="$GITHUB_WORKSPACE/ios/CBVVPN/CBVVPN.entitlements"
+          EXT_ENTITLEMENTS="$GITHUB_WORKSPACE/ios/CBVVPNProxyExtension/CBVVPNProxyExtension.entitlements"
+
+          # Sign main app
+          MAIN_BINARY="$PWD/build/output/Payload/$APP_NAME/$BINARY_NAME"
+          if [ -f "$MAIN_BINARY" ] && [ -f "$MAIN_ENTITLEMENTS" ]; then
+            echo "Signing main app: $MAIN_BINARY"
+            ldid "-S$MAIN_ENTITLEMENTS" "$MAIN_BINARY"
+            echo "✅ Main app signed with entitlements"
+            
+            # Verify
+            ldid -e "$MAIN_BINARY" > /tmp/main-ent-check.xml
+            if [ -s /tmp/main-ent-check.xml ]; then
+              echo "✅ Main app entitlements verified:"
+              head -15 /tmp/main-ent-check.xml
+            fi
+          else
+            echo "⚠️  Main binary or entitlements not found"
+          fi
+
+          # Sign extensions
+          if [ -d "$PWD/build/output/Payload/$APP_NAME/PlugIns" ]; then
+            for EXTENSION in "$PWD/build/output/Payload/$APP_NAME/PlugIns"/*.appex; do
+              if [ -d "$EXTENSION" ]; then
+                EXT_NAME=$(basename "$EXTENSION" .appex)
+                EXT_BINARY="$EXTENSION/$EXT_NAME"
+                
+                if [ -f "$EXT_BINARY" ] && [ -f "$EXT_ENTITLEMENTS" ]; then
+                  echo "Signing extension: $EXT_NAME"
+                  ldid "-S$EXT_ENTITLEMENTS" "$EXT_BINARY"
+                  echo "✅ Extension signed: $EXT_NAME"
+                fi
+              fi
+            done
+          fi
+
+          # Remove Apple code signatures (keep ldid signatures)
+          echo "Removing Apple code signatures..."
+          find "$PWD/build/output/Payload/$APP_NAME" -name "_CodeSignature" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$PWD/build/output/Payload/$APP_NAME" -name "embedded.mobileprovision" -type f -exec rm -f {} + 2>/dev/null || true
+          find "$PWD/build/output/Payload/$APP_NAME" -name "embedded.entitlements" -type f -exec rm -f {} + 2>/dev/null || true
+          echo "✅ Apple signatures removed (ldid signatures preserved)"
 
           # Create IPA with proper structure
           cd "$PWD/build/output"
-          zip -r CBProProxy.ipa Payload
+          zip -qr CBProProxy.ipa Payload
           rm -rf Payload
 
-          echo "✅ Unsigned IPA created successfully"
-          echo "📱 Compatible with: AltStore, Sideloadly, TrollStore, Scarlet"
+          echo "✅ IPA created with ldid signing for TrollStore VPN support"
+          echo "📱 Compatible with: TrollStore (VPN works!), AltStore, Sideloadly"
           ls -lh CBProProxy.ipa
 
       - name: Rename IPA with version
