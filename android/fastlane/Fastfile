@@ -32,7 +32,7 @@ platform :android do
     UI.message("Uploading to Google Play Store...")
     upload_to_play_store(
       track: options[:track] || 'internal',
-      release_status: options[:release_status] || 'draft',
+      release_status: 'draft',  # Always create draft releases for draft apps
       version_name: version_name,
       build_number: current_build_number,
       aab: 'app/build/outputs/bundle/release/app-release.aab',

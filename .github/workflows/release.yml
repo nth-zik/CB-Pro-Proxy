@@ -534,6 +534,7 @@ jobs:
           echo "✅ Found AAB: $AAB_FILE"
           bundle exec fastlane supply \
             --track $PLAY_STORE_TRACK \
+            --release_status draft \
             --aab $AAB_FILE \
             --json_key google_play_key.json \
             --package_name com.cbv.vpn \
