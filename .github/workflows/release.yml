@@ -440,10 +440,14 @@ jobs:
           PLAY_STORE_TRACK: ${{ github.event.inputs.playstore_track || 'internal' }}
         run: |
           echo "📤 Uploading to Play Store track: $PLAY_STORE_TRACK"
+          echo "📂 Checking AAB file..."
+          ls -lah app/build/outputs/bundle/release/
+          AAB_FILE=$(ls app/build/outputs/bundle/release/*.aab | head -n 1)
+          echo "✅ Found AAB: $AAB_FILE"
           bundle exec fastlane supply \
             --track $PLAY_STORE_TRACK \
-            --aab android/app/build/outputs/bundle/release/cbv-vpn-v${{ needs.prepare.outputs.version }}.aab \
-            --json_key android/google_play_key.json \
+            --aab $AAB_FILE \
+            --json_key google_play_key.json \
             --package_name com.cbv.vpn \
             --skip_upload_metadata \
             --skip_upload_images \
