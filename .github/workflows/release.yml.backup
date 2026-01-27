@@ -1,0 +1,534 @@
+name: Build Release (Android + iOS)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to use (e.g. 1.2.3). Required for manual runs."
+        required: true
+        default: ""
+      release_notes:
+        description: "Release notes to include in the GitHub Release"
+        required: false
+        default: ""
+      deploy_to_playstore:
+        description: "Deploy to Google Play Store after release"
+        required: false
+        type: boolean
+        default: false
+      playstore_track:
+        description: "Play Store release track"
+        required: false
+        type: choice
+        default: "internal"
+        options:
+          - internal
+          - alpha
+          - beta
+          - production
+
+permissions:
+  contents: write
+
+jobs:
+  # Generate release notes once for both platforms
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_notes: ${{ steps.release_notes.outputs.LOG }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate Release Notes from Commit History
+        id: release_notes
+        run: |
+          echo "Recent tags:"
+          git tag --sort=-v:refname | head -n 5
+
+          if [[ "${{ github.ref }}" == "refs/tags/"* ]]; then
+            CURRENT_REF="${{ github.ref_name }}"
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${CURRENT_REF}^" 2>/dev/null || echo "")
+          else
+            CURRENT_REF="HEAD"
+            PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          fi
+
+          echo "Generating notes from '$PREVIOUS_TAG' to '$CURRENT_REF'"
+
+          if [[ -z "$PREVIOUS_TAG" ]]; then
+            echo "No previous tag found. Getting last 20 commits."
+            COMMITS=$(git log -n 20 --pretty=format:"- %s (%h)" "$CURRENT_REF")
+          else
+            COMMITS=$(git log "$PREVIOUS_TAG..$CURRENT_REF" --pretty=format:"- %s (%h)")
+          fi
+
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "LOG<<$EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
+          echo "$EOF" >> $GITHUB_OUTPUT
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ -n "${{ github.event.inputs.version || '' }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Using manual input version: $VERSION"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "Using tag-based version: $VERSION"
+          else
+            echo "ERROR: Version must be provided for manual runs"
+            exit 1
+          fi
+          VERSION=${VERSION#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  # Build Android APK
+  build-android:
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Update app.json version
+        run: |
+          node -e "
+          const fs = require('fs');
+          const appJson = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          appJson.expo.version = '${{ needs.prepare.outputs.version }}';
+          appJson.expo.android.versionCode = ${{ github.run_number }};
+          fs.writeFileSync('app.json', JSON.stringify(appJson, null, 2));
+          "
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode Keystore
+        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/release.keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+      - name: Build Android Release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Build Android Release AAB (for Play Store)
+        if: github.event.inputs.deploy_to_playstore == 'true' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cd android
+          ./gradlew bundleRelease --no-daemon
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Rename APK with version
+        run: |
+          mkdir -p build-output
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             "build-output/cbv-vpn-v${{ needs.prepare.outputs.version }}.apk"
+
+      - name: Copy AAB to output
+        if: github.event.inputs.deploy_to_playstore == 'true' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p build-output
+          cp android/app/build/outputs/bundle/release/app-release.aab \
+             "build-output/cbv-vpn-v${{ needs.prepare.outputs.version }}.aab"
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: build-output/*.apk
+          retention-days: 5
+
+      - name: Upload Android AAB artifact
+        if: github.event.inputs.deploy_to_playstore == 'true' || startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab
+          path: build-output/*.aab
+          retention-days: 5
+
+  # Build iOS IPA
+  build-ios:
+    needs: prepare
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm install
+          npm install -g expo-cli @expo/cli
+
+      - name: Update app.json version
+        run: |
+          node -e "
+          const fs = require('fs');
+          const appJson = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          appJson.expo.version = '${{ needs.prepare.outputs.version }}';
+          appJson.expo.ios.buildNumber = '${{ github.run_number }}';
+          fs.writeFileSync('app.json', JSON.stringify(appJson, null, 2));
+          "
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: false
+
+      - name: Install CocoaPods
+        run: gem install cocoapods -v '~> 1.16'
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Install iOS dependencies
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Update iOS Info.plist versions
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.prepare.outputs.version }}" ios/CBVVPN/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" ios/CBVVPN/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.prepare.outputs.version }}" ios/CBVVPNProxyExtension/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" ios/CBVVPNProxyExtension/Info.plist
+
+      - name: Build iOS Archive (Unsigned for Sideloading)
+        run: |
+          cd ios
+          set -o pipefail
+          xcodebuild \
+            -workspace CBVVPN.xcworkspace \
+            -scheme CBVVPN \
+            -configuration Release \
+            -archivePath "$PWD/build/CBProProxy.xcarchive" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            clean archive 2>&1 | tee "$PWD/build/xcodebuild.log"
+
+      - name: Install ldid for TrollStore signing
+        run: |
+          if ! command -v ldid &> /dev/null; then
+            echo "Installing ldid..."
+            brew install ldid
+          fi
+          ldid --version || echo "ldid installed"
+
+      - name: Create IPA with ldid signing for TrollStore
+        run: |
+          cd ios
+
+          echo "Creating IPA with ldid signing for TrollStore..."
+          mkdir -p "$PWD/build/output/Payload"
+
+          # Investigate archive structure
+          echo "Examining archive structure..."
+          ls -la "$PWD/build/CBProProxy.xcarchive/Products/Applications/" || true
+
+          # Find .app bundle (app name may vary based on archive name)
+          APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive/Products/Applications" -name "*.app" -type d -maxdepth 1 | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            # Fallback: try Products/ directly
+            APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive/Products" -name "*.app" -type d -maxdepth 1 | head -n 1)
+          fi
+
+          if [ -z "$APP_PATH" ]; then
+            # Last resort: search entire archive
+            APP_PATH=$(find "$PWD/build/CBProProxy.xcarchive" -name "*.app" -type d | grep -v "Plugins" | head -n 1)
+          fi
+
+          if [ -n "$APP_PATH" ]; then
+            echo "✅ Found app at: $APP_PATH"
+          else
+            echo "❌ Error: No .app bundle found in archive"
+            echo "Archive structure:"
+            find "$PWD/build/CBProProxy.xcarchive" -type d -maxdepth 3
+            exit 1
+          fi
+
+          # Copy the .app to Payload
+          cp -r "$APP_PATH" "$PWD/build/output/Payload/"
+
+          # Get app name from path
+          APP_NAME=$(basename "$APP_PATH")
+          BINARY_NAME="${APP_NAME%.app}"
+          echo "📱 App bundle: $APP_NAME"
+          echo "📱 Binary name: $BINARY_NAME"
+
+          # Sign with ldid for TrollStore VPN support
+          echo "🔐 Signing with ldid for TrollStore..."
+
+          MAIN_ENTITLEMENTS="$GITHUB_WORKSPACE/ios/CBVVPN/CBVVPN.entitlements"
+          EXT_ENTITLEMENTS="$GITHUB_WORKSPACE/ios/CBVVPNProxyExtension/CBVVPNProxyExtension.entitlements"
+
+          # Sign main app
+          MAIN_BINARY="$PWD/build/output/Payload/$APP_NAME/$BINARY_NAME"
+          if [ -f "$MAIN_BINARY" ] && [ -f "$MAIN_ENTITLEMENTS" ]; then
+            echo "Signing main app: $MAIN_BINARY"
+            ldid "-S$MAIN_ENTITLEMENTS" "$MAIN_BINARY"
+            echo "✅ Main app signed with entitlements"
+            
+            # Verify
+            ldid -e "$MAIN_BINARY" > /tmp/main-ent-check.xml
+            if [ -s /tmp/main-ent-check.xml ]; then
+              echo "✅ Main app entitlements verified:"
+              head -15 /tmp/main-ent-check.xml
+            fi
+          else
+            echo "⚠️  Main binary or entitlements not found"
+          fi
+
+          # Sign extensions
+          if [ -d "$PWD/build/output/Payload/$APP_NAME/PlugIns" ]; then
+            for EXTENSION in "$PWD/build/output/Payload/$APP_NAME/PlugIns"/*.appex; do
+              if [ -d "$EXTENSION" ]; then
+                EXT_NAME=$(basename "$EXTENSION" .appex)
+                EXT_BINARY="$EXTENSION/$EXT_NAME"
+                
+                if [ -f "$EXT_BINARY" ] && [ -f "$EXT_ENTITLEMENTS" ]; then
+                  echo "Signing extension: $EXT_NAME"
+                  ldid "-S$EXT_ENTITLEMENTS" "$EXT_BINARY"
+                  echo "✅ Extension signed: $EXT_NAME"
+                fi
+              fi
+            done
+          fi
+
+          # Remove Apple code signatures (keep ldid signatures)
+          echo "Removing Apple code signatures..."
+          find "$PWD/build/output/Payload/$APP_NAME" -name "_CodeSignature" -type d -prune -exec rm -rf {} + 2>/dev/null || true
+          find "$PWD/build/output/Payload/$APP_NAME" -name "embedded.mobileprovision" -type f -exec rm -f {} + 2>/dev/null || true
+          find "$PWD/build/output/Payload/$APP_NAME" -name "embedded.entitlements" -type f -exec rm -f {} + 2>/dev/null || true
+          echo "✅ Apple signatures removed (ldid signatures preserved)"
+
+          cd "$PWD/build/output"
+          zip -r CBProProxy.ipa Payload
+          rm -rf Payload
+
+          echo "✅ Unsigned IPA created for AltStore/Sideloadly/TrollStore"
+
+      - name: Rename IPA with version
+        run: |
+          mkdir -p build-output
+          cp ios/build/output/CBProProxy.ipa \
+             "build-output/CBProProxy-${{ needs.prepare.outputs.version }}-unsigned.ipa"
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: build-output/*.ipa
+          retention-days: 5
+
+  # Create unified GitHub Release
+  create-release:
+    needs: [prepare, build-android, build-ios]
+    runs-on: ubuntu-latest
+    if: always() && (needs.build-android.result == 'success' || needs.build-ios.result == 'success')
+
+    steps:
+      - name: Download Android APK
+        if: needs.build-android.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: release-assets
+
+      - name: Download iOS IPA
+        if: needs.build-ios.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-ipa
+          path: release-assets
+
+      - name: List release assets
+        run: |
+          echo "Release assets:"
+          ls -lh release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || format('v{0}', needs.prepare.outputs.version) }}
+          name: Release v${{ needs.prepare.outputs.version }}
+          files: release-assets/*
+          body: |
+            ## CB Pro Proxy v${{ needs.prepare.outputs.version }}
+
+            ### Android APK
+            ${{ needs.build-android.result == 'success' && '✅ Available' || '❌ Build failed' }}
+            - **File**: `cbv-vpn-v${{ needs.prepare.outputs.version }}.apk`
+            - **Install**: Enable "Unknown sources" → Install APK
+
+            ### iOS IPA (Unsigned - for Sideloading)
+            ${{ needs.build-ios.result == 'success' && '✅ Available' || '❌ Build failed' }}
+            - **File**: `CBProProxy-${{ needs.prepare.outputs.version }}-unsigned.ipa`
+
+            #### Installation Guide
+
+            **AltStore (Recommended):**
+            1. Download IPA file
+            2. Open AltStore → "My Apps" → tap "+"
+            3. Select downloaded IPA → Wait for install
+            4. Re-sign every 7 days via AltStore
+
+            **Sideloadly:**
+            1. Download IPA file
+            2. Connect iPhone to computer
+            3. Open Sideloadly → Drag IPA into it
+            4. Enter Apple ID → Install
+
+            **TrollStore (iOS 14.0-16.6.1):**
+            1. Download IPA file
+            2. Open in TrollStore → Install
+            3. No re-signing needed!
+
+            ---
+
+            ### Changes
+            ${{ github.event.inputs.release_notes || needs.prepare.outputs.release_notes }}
+
+            ---
+            Build #${{ github.run_number }} | Commit: `${{ github.sha }}`
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Deploy to Google Play Store (Auto on v* tags or Manual)
+  deploy-playstore:
+    needs: [prepare, build-android, create-release]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.deploy_to_playstore == 'true' || startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: false
+
+      - name: Setup Fastlane
+        working-directory: android
+        run: |
+          gem install bundler
+          bundle install
+
+      - name: Download AAB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: android-aab
+          path: android/app/build/outputs/bundle/release/
+
+      - name: Decode Play Store credentials
+        env:
+          PLAY_STORE_JSON_BASE64: ${{ secrets.PLAY_STORE_JSON_BASE64 }}
+        run: |
+          cd android
+          if [ -z "$PLAY_STORE_JSON_BASE64" ]; then
+            echo "❌ PLAY_STORE_JSON_BASE64 secret not found!"
+            echo "ℹ️  Please add this secret to deploy to Play Store"
+            exit 1
+          fi
+          echo $PLAY_STORE_JSON_BASE64 | base64 -d > google_play_key.json
+          echo "✅ Play Store credentials decoded"
+
+      - name: Upload to Google Play Store
+        working-directory: android
+        env:
+          PLAY_STORE_TRACK: ${{ github.event.inputs.playstore_track || 'internal' }}
+        run: |
+          echo "📤 Uploading to Play Store track: $PLAY_STORE_TRACK"
+          echo "📂 Checking AAB file..."
+          ls -lah app/build/outputs/bundle/release/
+          AAB_FILE=$(ls app/build/outputs/bundle/release/*.aab | head -n 1)
+          echo "✅ Found AAB: $AAB_FILE"
+          bundle exec fastlane supply \
+            --track $PLAY_STORE_TRACK \
+            --aab $AAB_FILE \
+            --json_key google_play_key.json \
+            --package_name com.cbv.vpn \
+            --skip_upload_metadata \
+            --skip_upload_images \
+            --skip_upload_screenshots
+          echo "✅ Successfully uploaded to Play Store ($PLAY_STORE_TRACK track)"
+
+      - name: Add Play Store deployment info to release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tagName = '${{ github.ref_name }}' || 'v${{ needs.prepare.outputs.version }}';
+            const release = await github.rest.repos.getReleaseByTag({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag: tagName
+            });
+
+            const track = '${{ github.event.inputs.playstore_track }}' || 'internal';
+            const newBody = release.data.body + '\n\n---\n\n## 🏪 Google Play Store Deployment\n\n' +
+              '✅ Successfully deployed to **' + track + '** track\n' +
+              '- **Version**: ${{ needs.prepare.outputs.version }}\n' +
+              '- **Build Number**: ${{ github.run_number }}\n' +
+              '- **Deployed at**: ' + new Date().toISOString();
+
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id,
+              body: newBody
+            });
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
